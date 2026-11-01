@@ -408,6 +408,8 @@ private fun UpdateRow(version: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by Updater.state.collectAsStateWithLifecycle()
+    // Ekran her açıldığında ve güncelleme durumu değiştiğinde yeniden oku.
+    val silent = remember(state) { Updater.silentStatus(context) }
     val status = when (val s = state) {
         Updater.State.Checking -> "Kontrol ediliyor…"
         Updater.State.UpToDate -> "En güncel sürümdesin"
@@ -431,6 +433,27 @@ private fun UpdateRow(version: String) {
         Column(Modifier.weight(1f)) {
             Text("Sürüm ${version.ifBlank { "?" }}", style = MaterialTheme.typography.labelLarge)
             Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                when {
+                    silent.ready -> "Sessiz güncelleme: hazır ✓"
+                    !silent.canInstall -> "Sessiz güncelleme: yükleme izni kapalı"
+                    else -> "Sessiz güncelleme: son kurulum ${silent.installerName ?: "bilinmeyen"} ile yapılmış"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (silent.ready) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+            )
+            if (!silent.canInstall) {
+                Text(
+                    "İzni aç",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { Updater.openInstallPermission(context) }
+                        .padding(vertical = 2.dp),
+                )
+            }
         }
         if (state is Updater.State.NeedsConfirm) {
             TextButton(onClick = { Updater.confirm(context) }) { Text("Yükle") }

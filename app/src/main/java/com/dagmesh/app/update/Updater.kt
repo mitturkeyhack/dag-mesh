@@ -104,6 +104,49 @@ object Updater {
         )
     }
 
+    /** Sessiz güncellemenin şartları sağlanıyor mu? (Ekranda gösterilir.) */
+    data class SilentStatus(val installerIsSelf: Boolean, val installerName: String?, val canInstall: Boolean) {
+        val ready: Boolean get() = installerIsSelf && canInstall
+    }
+
+    fun silentStatus(context: Context): SilentStatus {
+        val pm = context.packageManager
+        val installer = try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                pm.getInstallSourceInfo(context.packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstallerPackageName(context.packageName)
+            }
+        } catch (e: Exception) {
+            null
+        }
+        val label = installer?.let {
+            try {
+                pm.getApplicationLabel(pm.getApplicationInfo(it, 0)).toString()
+            } catch (e: Exception) {
+                it
+            }
+        }
+        return SilentStatus(
+            installerIsSelf = installer == context.packageName,
+            installerName = label,
+            canInstall = pm.canRequestPackageInstalls(),
+        )
+    }
+
+    /** "Bilinmeyen uygulamaları yükle" iznini açma ekranı. */
+    fun openInstallPermission(context: Context) {
+        try {
+            context.startActivity(
+                Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${context.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "İzin ekranı açılamadı", e)
+        }
+    }
+
     fun currentVersionCode(context: Context): Long =
         PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0))
 
