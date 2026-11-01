@@ -19,7 +19,7 @@ Her sürüm aynı imzayla çıktığı için yeni APK eskisinin üstüne kurulur
 1. ✅ Yakındakileri bulma (Bluetooth + Wi‑Fi Direct + Wi‑Fi Aware), metin mesajı, zincirleme aktarım, sakla‑ilet
 2. ✅ Sesli mesaj, fotoğraf, video, dosya (parçalı aktarım, eksik parça isteme), sesli arama (ADPCM, yankı engelleme)
 3. Uçtan uca şifreleme, QR ile kişi ekleme
-4. SOS acil durum yayını, çevrimdışı harita ve konum paylaşımı
+4. ✅ Konum gönderme (GPS, uzaklık + yön) · ✅ Şebeke köprüsü (SMS) · SOS acil durum yayını
 5. ✅ Pil modları (Performans / Dengeli / Tasarruf), uygulamayı internetsiz paylaşma (QR + Wi‑Fi noktası, Quick Share)
 6. Yerel sosyal akış
 

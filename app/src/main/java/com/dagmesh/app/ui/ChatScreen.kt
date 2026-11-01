@@ -89,6 +89,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dagmesh.app.App
 import com.dagmesh.app.media.MediaFiles
 import com.dagmesh.app.media.VideoCompressor
+import com.dagmesh.app.media.LocationHelper
+import androidx.compose.material.icons.rounded.Place
+import androidx.compose.material3.CircularProgressIndicator
 import com.dagmesh.app.media.VoicePlayer
 import androidx.compose.material3.LinearProgressIndicator
 import com.dagmesh.app.media.VoiceRecorder
@@ -107,8 +110,17 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     val stored by remember(peerId) { dao.peer(peerId) }
         .collectAsStateWithLifecycle(initialValue = null)
     val peers by app.mesh.peers.collectAsStateWithLifecycle()
-    val live = peers[peerId]
+    val isSms = peerId.startsWith(MessageEntity.SMS_PREFIX)
+    val live = if (isSms) null else peers[peerId]
     val name = live?.name ?: stored?.name ?: "Bilinmeyen"
+    val bridgeOn by app.mesh.bridge.enabled.collectAsStateWithLifecycle()
+    val bridges by app.mesh.bridge.bridges.collectAsStateWithLifecycle()
+    val smsStatus = when {
+        bridgeOn -> "SMS · bu telefon köprü"
+        bridges.isNotEmpty() -> "SMS · köprü: " + bridges.values.minBy { it.hops }.name
+        else -> "Köprü yok · mesaj sırada bekler"
+    }
+    var locating by remember { mutableStateOf(false) }
 
     // "yazıyor…": karşı taraf yazdıkça süre uzar, bitince kendiliğinden kaybolur.
     val typingMap by app.mesh.typing.collectAsStateWithLifecycle()
@@ -197,6 +209,15 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
             VoicePlayer.stop()
         }
     }
+    // Karşı taraftan konum geldiyse uzaklık/yön için kendi konumunu tazele.
+    val hasIncomingLocation = messages.any { !it.fromMe && it.kind == MessageEntity.KIND_LOCATION }
+    LaunchedEffect(hasIncomingLocation) {
+        if (hasIncomingLocation) {
+            LocationHelper.lastKnownQuick(context)
+            LocationHelper.current(context, timeoutMs = 60_000)
+        }
+    }
+
     // Okundu bilgisi sadece ekran gerçekten açıkken gider.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         scope.launch { app.mesh.markConversationRead(peerId) }
@@ -243,7 +264,11 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                         Column {
                             Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                if (typingVisible) "yazıyor…" else peerStatus(live),
+                                when {
+                                    isSms -> smsStatus
+                                    typingVisible -> "yazıyor…"
+                                    else -> peerStatus(live)
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {
                                     typingVisible -> MaterialTheme.colorScheme.primary
@@ -258,7 +283,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(
+                    if (!isSms) IconButton(
                         onClick = {
                             if (live?.isDirect == true) withMic("call") { startCall() }
                             else toast("Arama için kişinin doğrudan bağlı olması gerekir")
@@ -285,6 +310,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                       .imePadding(),
               ) {
                 videoPreparing?.let { PreparingStrip(it) }
+                if (locating) LocatingStrip()
                 replyTo?.let { target ->
                     ReplyStrip(
                         author = if (target.fromMe) "Sen" else name,
@@ -313,7 +339,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                             },
                         )
                     } else {
-                        Box {
+                        if (!isSms) Box {
                             IconButton(onClick = { menuOpen = true }) {
                                 Icon(
                                     Icons.Rounded.AddCircle,
@@ -335,6 +361,18 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                                     menuOpen = false
                                     pickFile.launch(arrayOf("*/*"))
                                 }
+                                AttachItem(Icons.Rounded.Place, "Konum") {
+                                    menuOpen = false
+                                    if (!locating) {
+                                        locating = true
+                                        scope.launch {
+                                            val location = LocationHelper.current(context)
+                                            locating = false
+                                            if (location == null) toast("Konum alınamadı. Konum'un açık olduğundan emin ol, açık alanda tekrar dene.")
+                                            else app.mesh.sendLocation(peerId, location)
+                                        }
+                                    }
+                                }
                             }
                         }
                         OutlinedTextField(
@@ -355,7 +393,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                             ),
                             modifier = Modifier.weight(1f),
                         )
-                        val textMode = input.isNotBlank()
+                        val textMode = input.isNotBlank() || isSms
                         FilledIconButton(
                             onClick = { if (textMode) sendText() else withMic("record") { startRecording() } },
                             modifier = Modifier.size(52.dp),
@@ -554,6 +592,29 @@ private fun PreparingStrip(percent: Int) {
                 .clip(RoundedCornerShape(50)),
             color = MaterialTheme.colorScheme.secondary,
             trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        )
+    }
+}
+
+
+@Composable
+private fun LocatingStrip() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+        Text(
+            "Konum alınıyor (GPS)… açık alanda daha hızlı",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

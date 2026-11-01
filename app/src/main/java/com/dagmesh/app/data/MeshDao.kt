@@ -53,6 +53,10 @@ interface MeshDao {
     @Query("UPDATE messages SET peerReaction = :emoji WHERE id = :id AND peerId = :peerId")
     suspend fun setPeerReaction(id: String, peerId: String, emoji: String?)
 
+    /** SMS köprüsü gönderemediyse mesajı "gönderilemedi" olarak işaretle. */
+    @Query("UPDATE messages SET progress = -1 WHERE id = :id")
+    suspend fun markFailed(id: String)
+
     @Query("DELETE FROM messages WHERE id = :id")
     suspend fun delete(id: String)
 
@@ -61,6 +65,9 @@ interface MeshDao {
 
     @Query("SELECT * FROM peers WHERE id = :id")
     fun peer(id: String): Flow<PeerEntity?>
+
+    @Query("SELECT * FROM peers WHERE id = :id")
+    suspend fun peerNow(id: String): PeerEntity?
 
     @Query(
         """

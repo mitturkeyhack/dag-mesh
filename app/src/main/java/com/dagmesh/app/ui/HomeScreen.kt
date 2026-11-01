@@ -122,6 +122,9 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
     var showShare by remember { mutableStateOf(false) }
     var showPower by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
+    var showBridge by remember { mutableStateOf(false) }
+
+    if (showBridge) BridgeSheet(onDismiss = { showBridge = false }, onOpenChat = onOpenChat)
 
     if (showRename) {
         RenameDialog(
@@ -201,7 +204,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item(key = "radar") { RadarCard(peers, running) }
+            item(key = "radar") { RadarCard(peers, running, onBridgeClick = { showBridge = true }) }
 
             if (updateState is Updater.State.Downloading || updateState is Updater.State.Installing ||
                 updateState is Updater.State.NeedsConfirm
@@ -251,7 +254,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
 }
 
 @Composable
-private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean) {
+private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean, onBridgeClick: () -> Unit) {
     val direct = peers.count { it.isDirect }
     val relayed = peers.size - direct
     Surface(
@@ -297,6 +300,8 @@ private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     App.instance.mesh.transports.forEach { ChannelRow(it) }
                 }
+                Spacer(Modifier.height(6.dp))
+                BridgeChip(onClick = onBridgeClick)
             }
         }
     }

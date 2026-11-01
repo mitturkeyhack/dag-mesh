@@ -3,6 +3,12 @@
 package com.dagmesh.app.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Place
+import com.dagmesh.app.media.LocationHelper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -153,9 +159,10 @@ fun MessageBubble(
                             MessageEntity.KIND_VIDEO -> VideoContent(message, openMenu)
                             MessageEntity.KIND_AUDIO -> AudioContent(message, content)
                             MessageEntity.KIND_FILE -> FileContent(message, content, openMenu)
+                            MessageEntity.KIND_LOCATION -> LocationContent(message, content)
                         }
                         Column(Modifier.padding(start = 12.dp, end = 10.dp, top = if (message.isMedia) 4.dp else 9.dp, bottom = 7.dp)) {
-                            if (message.text.isNotBlank()) {
+                            if (message.text.isNotBlank() && message.kind != MessageEntity.KIND_LOCATION) {
                                 Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
                             }
                             if (message.isMedia && message.progress < 100) {
@@ -332,7 +339,17 @@ private fun MetaRow(message: MessageEntity, content: Color, modifier: Modifier) 
             )
         }
         Text(formatTime(message.timestamp), style = MaterialTheme.typography.labelSmall, color = content.copy(alpha = 0.7f))
-        if (message.fromMe) StatusIcon(message.status, content)
+        if (message.fromMe && message.progress == -1) {
+            Icon(
+                Icons.Rounded.ErrorOutline,
+                contentDescription = "Gönderilemedi",
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(15.dp),
+            )
+            Text("Gönderilemedi", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        } else if (message.fromMe) {
+            StatusIcon(message.status, content)
+        }
     }
 }
 
@@ -587,5 +604,67 @@ fun ImageViewer(path: String, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+}
+
+
+/** Konum mesajı: doğruluk, (karşı taraf için) uzaklık ve yön, haritada aç. */
+@Composable
+private fun LocationContent(message: MessageEntity, content: Color) {
+    val context = LocalContext.current
+    val point = remember(message.text) { LocationHelper.decode(message.text) } ?: return
+    val myLocation by LocationHelper.last.collectAsStateWithLifecycle()
+    Column(
+        Modifier
+            .width(250.dp)
+            .padding(start = 10.dp, end = 10.dp, top = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Place, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+            }
+            Column {
+                Text(
+                    if (message.fromMe) "Konumunu gönderdin" else "Konum",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = content,
+                )
+                Text(
+                    if (point.accuracy > 0) "± ${point.accuracy} m doğruluk" else "GPS konumu",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = content.copy(alpha = 0.7f),
+                )
+            }
+        }
+        if (!message.fromMe) {
+            Text(
+                myLocation?.let { LocationHelper.distanceAndDirection(it, point) } ?: "Uzaklık için konumun bekleniyor…",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+        }
+        Text(
+            "Haritada aç",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable {
+                    val uri = Uri.parse("geo:${point.lat},${point.lon}?q=${point.lat},${point.lon}(Konum)")
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Harita uygulaması bulunamadı", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .padding(vertical = 4.dp),
+        )
     }
 }

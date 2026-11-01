@@ -35,7 +35,7 @@ data class MessageEntity(
     val myReaction: String? = null,
     val peerReaction: String? = null,
 ) {
-    val isMedia: Boolean get() = kind != KIND_TEXT && kind != KIND_CALL
+    val isMedia: Boolean get() = kind != KIND_TEXT && kind != KIND_CALL && kind != KIND_LOCATION
 
     companion object {
         const val STATUS_PENDING = 0
@@ -49,6 +49,11 @@ data class MessageEntity(
         const val KIND_AUDIO = "audio"
         const val KIND_FILE = "file"
         const val KIND_CALL = "call"
+        /** Metin "enlem,boylam,doğruluk(m)" biçiminde. */
+        const val KIND_LOCATION = "location"
+
+        /** Dışarıya (SMS ile) yazışılan kişilerin sohbet kimliği öneki. */
+        const val SMS_PREFIX = "sms:"
     }
 }
 
@@ -78,5 +83,6 @@ fun previewText(kind: String, text: String, fileName: String?): String = when (k
     MessageEntity.KIND_AUDIO -> "🎤 Sesli mesaj"
     MessageEntity.KIND_FILE -> "📎 " + (fileName ?: "Dosya")
     MessageEntity.KIND_CALL -> "📞 $text"
+    MessageEntity.KIND_LOCATION -> "📍 Konum"
     else -> text
 }

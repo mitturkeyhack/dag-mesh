@@ -42,6 +42,8 @@ data class Packet(
     val replyTo: String? = null,
     val replyText: String? = null,
     val replyAuthor: String? = null,
+    /** Metin dışı ama dosya da olmayan mesaj türü (ör. konum). */
+    val kind: String? = null,
 ) {
     fun forwarded(): Packet = copy(ttl = ttl - 1, hops = hops + 1)
 
@@ -62,6 +64,7 @@ data class Packet(
         replyTo?.let { o.put("rp", it) }
         replyText?.let { o.put("rt", it) }
         replyAuthor?.let { o.put("ra", it) }
+        kind?.let { o.put("kd", it) }
         media?.let { m ->
             o.put("k", m.kind)
             o.put("fn", m.name)
@@ -96,6 +99,10 @@ data class Packet(
         const val TYPE_READ = "read"
         const val TYPE_TYPING = "typ"
         const val TYPE_REACT = "rea"
+        /** Şebeke köprüsü: dışarıya SMS isteği, gelen SMS, gönderim sonucu. */
+        const val TYPE_SMS_OUT = "smo"
+        const val TYPE_SMS_IN = "smi"
+        const val TYPE_SMS_STATUS = "sst"
 
         const val DEFAULT_TTL = 6
         const val ANNOUNCE_TTL = 4
@@ -152,6 +159,7 @@ data class Packet(
                 replyTo = o.stringOrNull("rp"),
                 replyText = o.stringOrNull("rt"),
                 replyAuthor = o.stringOrNull("ra"),
+                kind = o.stringOrNull("kd"),
             )
         }
 
