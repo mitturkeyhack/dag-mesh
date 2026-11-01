@@ -123,6 +123,12 @@ class MeshManager(
         }
     }
 
+    /** Hata sonrası (ör. izin yeni verildiğinde) ağı baştan kurar. */
+    fun restart() {
+        stop()
+        start()
+    }
+
     fun stop() {
         if (!_running.value) return
         _running.value = false
@@ -402,7 +408,17 @@ class MeshManager(
     private fun onError(message: String, e: Exception) {
         Log.e(TAG, message, e)
         _error.value = "$message (${e.message ?: "bilinmeyen hata"})"
+        // Geçici hatalarda bir kez kendiliğinden tekrar dene.
+        if (!autoRetried) {
+            autoRetried = true
+            scope.launch {
+                delay(4_000)
+                if (_running.value && _error.value != null) restart()
+            }
+        }
     }
+
+    private var autoRetried = false
 
     private fun parseEndpointName(raw: String): Pair<String, String>? {
         val i = raw.indexOf('|')

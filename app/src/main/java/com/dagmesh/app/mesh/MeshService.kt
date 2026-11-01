@@ -1,8 +1,10 @@
 package com.dagmesh.app.mesh
 
+import android.Manifest
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -41,7 +43,7 @@ class MeshService : Service() {
                 this,
                 Notifications.STATUS_ID,
                 Notifications.status(this, 0, 0),
-                if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0,
+                serviceType(),
             )
         } catch (e: Exception) {
             Log.e("DagMesh", "Arka plan hizmeti başlatılamadı", e)
@@ -49,7 +51,7 @@ class MeshService : Service() {
             return START_NOT_STICKY
         }
 
-        mesh.start()
+        if (intent?.action == ACTION_RESTART) mesh.restart() else mesh.start()
 
         if (!collecting) {
             collecting = true
@@ -67,6 +69,19 @@ class MeshService : Service() {
         return START_STICKY
     }
 
+    /**
+     * Konum izni varsa hizmet "konum" türünde de çalışır. Böylece Android, ekran kapalıyken
+     * ve uygulama arka plandayken de yakındaki cihaz taramasına izin verir.
+     */
+    private fun serviceType(): Int {
+        if (Build.VERSION.SDK_INT < 29) return 0
+        var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        val hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasLocation) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        return type
+    }
+
     override fun onDestroy() {
         mesh.stop()
         scope.cancel()
@@ -75,9 +90,18 @@ class MeshService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.dagmesh.app.STOP"
+        const val ACTION_RESTART = "com.dagmesh.app.RESTART"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, MeshService::class.java))
+        }
+
+        /** Ağı sıfırdan kurar (izin değişikliği veya hata sonrası). */
+        fun restart(context: Context) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, MeshService::class.java).setAction(ACTION_RESTART),
+            )
         }
 
         fun stop(context: Context) {

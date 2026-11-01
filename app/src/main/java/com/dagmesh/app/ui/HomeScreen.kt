@@ -1,5 +1,9 @@
 package com.dagmesh.app.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -29,6 +33,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +52,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dagmesh.app.App
 import com.dagmesh.app.Permissions
@@ -75,6 +82,19 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
     ) {
         permsGranted = Permissions.hasCore(context)
         if (permsGranted) MeshService.start(context)
+    }
+
+    // Ayarlardan izin verip geri dönünce ağı otomatik toparla.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        val nowGranted = Permissions.hasCore(context)
+        val wasGranted = permsGranted
+        permsGranted = nowGranted
+        if (nowGranted) {
+            when {
+                !mesh.running.value -> MeshService.start(context)
+                !wasGranted || mesh.error.value != null -> MeshService.restart(context)
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -137,11 +157,20 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
 
             if (!permsGranted) {
                 item(key = "perm") {
-                    PermissionCard { permissionLauncher.launch(Permissions.required()) }
+                    PermissionCard(
+                        onGrant = { permissionLauncher.launch(Permissions.required()) },
+                        onSettings = { openAppSettings(context) },
+                    )
                 }
             }
             error?.let { message ->
-                item(key = "error") { ErrorCard(message) }
+                item(key = "error") {
+                    ErrorCard(
+                        message = message,
+                        onRetry = { MeshService.restart(context) },
+                        onSettings = { openAppSettings(context) },
+                    )
+                }
             }
 
             item(key = "h-near") { SectionHeader("YAKINDAKİLER", peers.size) }
@@ -308,7 +337,7 @@ private fun ConversationItem(row: ConversationRow, online: Boolean, onClick: () 
 }
 
 @Composable
-private fun PermissionCard(onGrant: () -> Unit) {
+private fun PermissionCard(onGrant: () -> Unit, onSettings: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
         shape = RoundedCornerShape(20.dp),
@@ -324,27 +353,55 @@ private fun PermissionCard(onGrant: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
-            Button(onClick = onGrant, shape = RoundedCornerShape(14.dp)) { Text("İzin ver") }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onGrant, shape = RoundedCornerShape(14.dp)) { Text("İzin ver") }
+                OutlinedButton(onClick = onSettings, shape = RoundedCornerShape(14.dp)) { Text("Ayarları aç") }
+            }
         }
     }
 }
 
 @Composable
-private fun ErrorCard(message: String) {
+private fun ErrorCard(message: String, onRetry: () -> Unit, onSettings: () -> Unit) {
+    val permissionProblem = message.contains("PERMISSION", ignoreCase = true)
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(
-            Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-            Text(message, style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Text(
+                    if (permissionProblem) "Bir izin eksik. Ayarlar → İzinler bölümünde Konum ve Yakındaki cihazlar iznini \"İzin ver\" yap."
+                    else message,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onRetry, shape = RoundedCornerShape(14.dp)) { Text("Tekrar dene") }
+                if (permissionProblem) {
+                    OutlinedButton(onClick = onSettings, shape = RoundedCornerShape(14.dp)) { Text("Ayarları aç") }
+                }
+            }
+            if (permissionProblem) {
+                Text(
+                    message,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
+}
+
+private fun openAppSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    context.startActivity(intent)
 }
 
 @Composable
