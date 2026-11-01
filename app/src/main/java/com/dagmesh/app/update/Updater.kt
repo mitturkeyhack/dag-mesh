@@ -60,6 +60,7 @@ object Updater {
     private const val NOTIFY_ID = 50
     private const val PERIODIC_WORK = "dagmesh-update-periodic"
     private const val NOW_WORK = "dagmesh-update-now"
+    private const val CHECK_INTERVAL_ON_OPEN_MS = 15 * 60 * 1000L
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -77,9 +78,26 @@ object Updater {
         wm.enqueueUniquePeriodicWork(
             PERIODIC_WORK,
             ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<UpdateWorker>(6, TimeUnit.HOURS).setConstraints(constraints).build(),
+            PeriodicWorkRequestBuilder<UpdateWorker>(3, TimeUnit.HOURS).setConstraints(constraints).build(),
         )
         wm.enqueueUniqueWork(
+            NOW_WORK,
+            ExistingWorkPolicy.KEEP,
+            OneTimeWorkRequestBuilder<UpdateWorker>().setConstraints(constraints).build(),
+        )
+    }
+
+    /**
+     * Uygulama her açıldığında çağrılır: son kontrolden bu yana 15 dk geçtiyse (internet geldiğinde)
+     * hemen bir kontrol daha sıraya koyar. Böylece yeni sürüm uygulamayı açar açmaz gelir.
+     */
+    fun checkIfDue(context: Context) {
+        val prefs = context.getSharedPreferences("update", Context.MODE_PRIVATE)
+        val last = prefs.getLong("last_check", 0L)
+        if (System.currentTimeMillis() - last < CHECK_INTERVAL_ON_OPEN_MS) return
+        prefs.edit().putLong("last_check", System.currentTimeMillis()).apply()
+        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
             NOW_WORK,
             ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<UpdateWorker>().setConstraints(constraints).build(),

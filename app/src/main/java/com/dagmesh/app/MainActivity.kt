@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
 import com.dagmesh.app.ui.AppRoot
 import com.dagmesh.app.ui.theme.DagMeshTheme
+import com.dagmesh.app.update.Updater
 
 class MainActivity : ComponentActivity() {
 
@@ -22,6 +23,12 @@ class MainActivity : ComponentActivity() {
                 AppRoot(openPeerId = openPeer.value, onPeerOpened = { openPeer.value = null })
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Uygulama her açıldığında (en fazla 15 dk'da bir) güncelleme kontrolü.
+        Updater.checkIfDue(this)
     }
 
     override fun onNewIntent(intent: Intent) {
