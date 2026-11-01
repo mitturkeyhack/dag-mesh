@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Telefonlar arası soket bağlantıları (Wi‑Fi Aware, QR paylaşım sunucusu) için gerekli.
+         İnternete çıkmak için değil; yerel bağlantılar da bu izni ister. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Bluetooth (eski sürümler) -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
