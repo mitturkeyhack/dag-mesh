@@ -77,7 +77,7 @@ object Updater {
         val wm = WorkManager.getInstance(context)
         wm.enqueueUniquePeriodicWork(
             PERIODIC_WORK,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<UpdateWorker>(3, TimeUnit.HOURS).setConstraints(constraints).build(),
         )
         wm.enqueueUniqueWork(
