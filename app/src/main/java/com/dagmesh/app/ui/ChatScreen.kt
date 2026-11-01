@@ -12,6 +12,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.rounded.Close
+import com.dagmesh.app.data.MessageEntity
+import com.dagmesh.app.data.previewText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -118,6 +124,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     val listState = rememberLazyListState()
     var input by rememberSaveable { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
+    var replyTo by remember { mutableStateOf<MessageEntity?>(null) }
     var viewerPath by remember { mutableStateOf<String?>(null) }
 
     val recorder = remember { VoiceRecorder(context) }
@@ -208,8 +215,9 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
 
     fun sendText() {
         if (input.isBlank()) return
-        app.mesh.sendText(peerId, input)
+        app.mesh.sendText(peerId, input, replyTo)
         input = ""
+        replyTo = null
     }
 
     viewerPath?.let { path -> ImageViewer(path) { viewerPath = null } }
@@ -268,10 +276,20 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
         },
         bottomBar = {
             Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+              Column(
+                  Modifier
+                      .navigationBarsPadding()
+                      .imePadding(),
+              ) {
+                replyTo?.let { target ->
+                    ReplyStrip(
+                        author = if (target.fromMe) "Sen" else name,
+                        text = previewText(target.kind, target.text, target.fileName),
+                        onClose = { replyTo = null },
+                    )
+                }
                 Row(
                     Modifier
-                        .navigationBarsPadding()
-                        .imePadding()
                         .padding(horizontal = 8.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -349,6 +367,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                         }
                     }
                 }
+              }
             }
         },
     ) { padding ->
@@ -380,11 +399,21 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
             }
             items(messages, key = { it.id }) { message ->
                 MessageBubble(
-                    message,
+                    message = message,
+                    peerName = name,
+                    myId = app.mesh.myId,
                     onOpenImage = { viewerPath = it },
                     onDelete = {
                         if (VoicePlayer.playingId.value == it.id) VoicePlayer.stop()
+                        if (replyTo?.id == it.id) replyTo = null
                         app.mesh.deleteLocal(it)
+                    },
+                    onReply = { replyTo = it },
+                    onReact = { m, emoji -> app.mesh.react(m, emoji) },
+                    onQuoteClick = { id ->
+                        val index = messages.indexOfFirst { it.id == id }
+                        if (index >= 0) scope.launch { listState.animateScrollToItem(index) }
+                        else toast("Alıntılanan mesaj silinmiş")
                     },
                 )
             }
@@ -455,3 +484,46 @@ private fun androidx.compose.foundation.layout.RowScope.RecordingBar(
 
 /** Sesli mesaj en fazla 5 dakika. */
 private const val MAX_VOICE_MS = 5 * 60 * 1000L
+
+
+/** Yazma kutusunun üstünde "şuna yanıt veriyorsun" şeridi. */
+@Composable
+private fun ReplyStrip(author: String, text: String, onClose: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 4.dp, top = 8.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .height(IntrinsicSize.Min),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .width(4.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.secondary)
+        )
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                "$author kişisine yanıt",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onClose) {
+            Icon(Icons.Rounded.Close, contentDescription = "Yanıtı iptal et", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}

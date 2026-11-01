@@ -104,6 +104,7 @@ class MeshManager(
     private var tickerJob: Job? = null
 
     val myName: String get() = identity.name.value ?: "?"
+    val myId: String get() = identity.userId
 
     // ---------------------------------------------------------------- başlat / durdur
 
@@ -202,7 +203,7 @@ class MeshManager(
 
     // ---------------------------------------------------------------- mesaj gönderme
 
-    fun sendText(peerId: String, text: String) {
+    fun sendText(peerId: String, text: String, replyTo: MessageEntity? = null) {
         val clean = text.trim()
         if (clean.isEmpty()) return
         val message = MessageEntity(
@@ -214,10 +215,27 @@ class MeshManager(
             status = MessageEntity.STATUS_PENDING,
             hops = 0,
             isRead = true,
+            replyToId = replyTo?.id,
+            replyText = replyTo?.let { previewText(it.kind, it.text, it.fileName).take(REPLY_PREVIEW_MAX) },
+            replyAuthor = replyTo?.let { if (it.fromMe) identity.userId else it.peerId },
         )
         scope.launch {
             dao.insertMessage(message)
             transmit(message)
+        }
+    }
+
+    /**
+     * Mesaja emoji tepkisi verir. Aynı emojiye tekrar basılırsa tepki kaldırılır.
+     * Tepki karşı tarafa da gider (menzil dışındaysa ulaşmayabilir).
+     */
+    fun react(message: MessageEntity, emoji: String) {
+        val newValue = if (message.myReaction == emoji) null else emoji
+        scope.launch {
+            dao.setMyReaction(message.id, newValue)
+            val packet = newPacket(Packet.TYPE_REACT, to = message.peerId, ref = message.id, text = newValue.orEmpty())
+            remember(packet.pid)
+            sendPacket(packet)
         }
     }
 
@@ -264,7 +282,12 @@ class MeshManager(
         val targets = route(message.peerId)
         if (targets.isEmpty()) return // kimse yok: mesaj sırada bekler
         val packet = newPacket(Packet.TYPE_MSG, to = message.peerId, ref = message.id, text = message.text)
-            .copy(ts = message.timestamp)
+            .copy(
+                ts = message.timestamp,
+                replyTo = message.replyToId,
+                replyText = message.replyText,
+                replyAuthor = message.replyAuthor,
+            )
         remember(packet.pid)
         sendTo(targets, packet.toBytes()) { ok ->
             if (ok) scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
@@ -457,6 +480,16 @@ class MeshManager(
                     forward(packet, fromLinkId)
                 }
 
+            Packet.TYPE_REACT ->
+                if (forMe) {
+                    packet.ref?.let { dao.setPeerReaction(it, packet.from, packet.text?.takeIf { e -> e.isNotBlank() }) }
+                    if (!packet.text.isNullOrBlank()) {
+                        emitIncoming(packet.from, packet.fromName, "${packet.text} tepkisi verdi")
+                    }
+                } else {
+                    forward(packet, fromLinkId)
+                }
+
             Packet.TYPE_TYPING ->
                 if (forMe) {
                     _typing.update { it + (packet.from to System.currentTimeMillis() + TYPING_SHOW_MS) }
@@ -478,6 +511,9 @@ class MeshManager(
                 status = MessageEntity.STATUS_DELIVERED,
                 hops = packet.hops,
                 isRead = false,
+                replyToId = packet.replyTo,
+                replyText = packet.replyText,
+                replyAuthor = packet.replyAuthor,
             )
         ) != -1L
         clearTyping(packet.from)
@@ -533,6 +569,7 @@ class MeshManager(
         private const val RESEND_WINDOW_MS = 48L * 60 * 60 * 1000
         private const val SEEN_CAPACITY = 20_000
         private const val TYPING_SHOW_MS = 5_000L
+        private const val REPLY_PREVIEW_MAX = 120
         private const val TYPING_SEND_INTERVAL_MS = 3_000L
     }
 }

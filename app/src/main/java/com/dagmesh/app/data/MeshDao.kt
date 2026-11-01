@@ -47,6 +47,12 @@ interface MeshDao {
     @Query("UPDATE messages SET status = 3 WHERE id = :id AND fromMe = 1 AND status < 3")
     suspend fun markReadByPeer(id: String)
 
+    @Query("UPDATE messages SET myReaction = :emoji WHERE id = :id")
+    suspend fun setMyReaction(id: String, emoji: String?)
+
+    @Query("UPDATE messages SET peerReaction = :emoji WHERE id = :id AND peerId = :peerId")
+    suspend fun setPeerReaction(id: String, peerId: String, emoji: String?)
+
     @Query("DELETE FROM messages WHERE id = :id")
     suspend fun delete(id: String)
 

@@ -4,6 +4,15 @@ package com.dagmesh.app.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.automirrored.rounded.Reply
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -65,9 +74,24 @@ import java.io.File
 
 private val ReadBlue = Color(0xFF4FB3FF)
 
-/** Bir sohbet mesajı: metin, fotoğraf, video, sesli mesaj, dosya veya arama kaydı. Basılı tutunca menü açılır. */
+/** Hızlı tepki emojileri. */
+private val QuickReactions = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+
+/**
+ * Bir sohbet mesajı: metin, fotoğraf, video, sesli mesaj, dosya veya arama kaydı.
+ * Basılı tutunca tepki emojileri ve Yanıtla / Kopyala / Sil menüsü açılır.
+ */
 @Composable
-fun MessageBubble(message: MessageEntity, onOpenImage: (String) -> Unit, onDelete: (MessageEntity) -> Unit) {
+fun MessageBubble(
+    message: MessageEntity,
+    peerName: String,
+    myId: String,
+    onOpenImage: (String) -> Unit,
+    onDelete: (MessageEntity) -> Unit,
+    onReply: (MessageEntity) -> Unit,
+    onReact: (MessageEntity, String) -> Unit,
+    onQuoteClick: (String) -> Unit,
+) {
     var menuOpen by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val openMenu = { menuOpen = true }
@@ -85,7 +109,7 @@ fun MessageBubble(message: MessageEntity, onOpenImage: (String) -> Unit, onDelet
                     )
             ) {
                 CallLogChip(message)
-                BubbleMenu(menuOpen, message, onDismiss = { menuOpen = false }, onCopy = null, onDelete = onDelete)
+                BubbleMenu(menuOpen, message, onDismiss = { menuOpen = false }, onCopy = null, onReply = null, onReact = null, onDelete = onDelete)
             }
         }
         return
@@ -96,49 +120,128 @@ fun MessageBubble(message: MessageEntity, onOpenImage: (String) -> Unit, onDelet
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Box {
-            Surface(
-                color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(
-                    topStart = 20.dp,
-                    topEnd = 20.dp,
-                    bottomStart = if (mine) 20.dp else 6.dp,
-                    bottomEnd = if (mine) 6.dp else 20.dp,
-                ),
-                modifier = Modifier
-                    .widthIn(max = 290.dp)
-                    .combinedClickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                        onLongClick = openMenu,
+        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            Box {
+                Surface(
+                    color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(
+                        topStart = 20.dp,
+                        topEnd = 20.dp,
+                        bottomStart = if (mine) 20.dp else 6.dp,
+                        bottomEnd = if (mine) 6.dp else 20.dp,
                     ),
-            ) {
-                Column(Modifier.padding(if (message.kind == MessageEntity.KIND_IMAGE || message.kind == MessageEntity.KIND_VIDEO) 4.dp else 0.dp)) {
-                    when (message.kind) {
-                        MessageEntity.KIND_IMAGE -> ImageContent(message, onOpenImage, openMenu)
-                        MessageEntity.KIND_VIDEO -> VideoContent(message, openMenu)
-                        MessageEntity.KIND_AUDIO -> AudioContent(message, content)
-                        MessageEntity.KIND_FILE -> FileContent(message, content, openMenu)
-                    }
-                    Column(Modifier.padding(start = 12.dp, end = 10.dp, top = if (message.isMedia) 4.dp else 9.dp, bottom = 7.dp)) {
-                        if (message.text.isNotBlank()) {
-                            Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
+                    modifier = Modifier
+                        .widthIn(max = 290.dp)
+                        .combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                            onLongClick = openMenu,
+                        ),
+                ) {
+                    Column(Modifier.padding(if (message.kind == MessageEntity.KIND_IMAGE || message.kind == MessageEntity.KIND_VIDEO) 4.dp else 0.dp)) {
+                        if (message.replyText != null) {
+                            QuoteBlock(
+                                author = if (message.replyAuthor == myId) "Sen" else peerName,
+                                text = message.replyText,
+                                content = content,
+                                onClick = { message.replyToId?.let(onQuoteClick) },
+                            )
                         }
-                        if (message.isMedia && message.progress < 100) {
-                            TransferProgress(message, content)
+                        when (message.kind) {
+                            MessageEntity.KIND_IMAGE -> ImageContent(message, onOpenImage, openMenu)
+                            MessageEntity.KIND_VIDEO -> VideoContent(message, openMenu)
+                            MessageEntity.KIND_AUDIO -> AudioContent(message, content)
+                            MessageEntity.KIND_FILE -> FileContent(message, content, openMenu)
                         }
-                        MetaRow(message, content, Modifier.align(Alignment.End))
+                        Column(Modifier.padding(start = 12.dp, end = 10.dp, top = if (message.isMedia) 4.dp else 9.dp, bottom = 7.dp)) {
+                            if (message.text.isNotBlank()) {
+                                Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
+                            }
+                            if (message.isMedia && message.progress < 100) {
+                                TransferProgress(message, content)
+                            }
+                            MetaRow(message, content, Modifier.align(Alignment.End))
+                        }
                     }
                 }
+                BubbleMenu(
+                    expanded = menuOpen,
+                    message = message,
+                    onDismiss = { menuOpen = false },
+                    onCopy = if (message.text.isNotBlank()) ({ clipboard.setText(AnnotatedString(message.text)) }) else null,
+                    onReply = onReply,
+                    onReact = onReact,
+                    onDelete = onDelete,
+                )
             }
-            BubbleMenu(
-                expanded = menuOpen,
-                message = message,
-                onDismiss = { menuOpen = false },
-                onCopy = if (message.text.isNotBlank()) ({ clipboard.setText(AnnotatedString(message.text)) }) else null,
-                onDelete = onDelete,
+            val reactions = listOfNotNull(message.peerReaction, message.myReaction)
+            if (reactions.isNotEmpty()) {
+                ReactionPill(
+                    reactions = reactions,
+                    modifier = Modifier
+                        .offset(y = (-8).dp)
+                        .padding(horizontal = 10.dp),
+                    onClick = openMenu,
+                )
+            }
+        }
+    }
+}
+
+/** Yanıtlanan mesajın alıntısı (balonun üstünde, renkli çizgili kutu). */
+@Composable
+private fun QuoteBlock(author: String, text: String, content: Color, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .padding(start = 6.dp, end = 6.dp, top = 6.dp)
+            .widthIn(min = 120.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(content.copy(alpha = 0.08f))
+            .clickable(onClick = onClick)
+            .height(IntrinsicSize.Min),
+    ) {
+        Box(
+            Modifier
+                .width(4.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.secondary)
+        )
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text(
+                author,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.secondary,
             )
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = content.copy(alpha = 0.8f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Balonun altındaki küçük emoji kapsülü. */
+@Composable
+private fun ReactionPill(reactions: List<String>, modifier: Modifier, onClick: () -> Unit) {
+    val shown = reactions.distinct()
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .border(1.5.dp, MaterialTheme.colorScheme.background, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        shown.forEach { Text(it, fontSize = 14.sp) }
+        if (reactions.size > shown.size) {
+            Text("2", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -149,9 +252,50 @@ private fun BubbleMenu(
     message: MessageEntity,
     onDismiss: () -> Unit,
     onCopy: (() -> Unit)?,
+    onReply: ((MessageEntity) -> Unit)?,
+    onReact: ((MessageEntity, String) -> Unit)?,
     onDelete: (MessageEntity) -> Unit,
 ) {
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(18.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        if (onReact != null) {
+            Row(
+                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                QuickReactions.forEach { emoji ->
+                    val selected = message.myReaction == emoji
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
+                            .clickable {
+                                onDismiss()
+                                onReact(message, emoji)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(emoji, fontSize = 22.sp)
+                    }
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+        }
+        if (onReply != null) {
+            DropdownMenuItem(
+                text = { Text("Yanıtla") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Reply, contentDescription = null) },
+                onClick = {
+                    onDismiss()
+                    onReply(message)
+                },
+            )
+        }
         if (onCopy != null) {
             DropdownMenuItem(
                 text = { Text("Kopyala") },

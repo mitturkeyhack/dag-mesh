@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MessageEntity::class, PeerEntity::class], version = 2, exportSchema = false)
+@Database(entities = [MessageEntity::class, PeerEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): MeshDao
 
@@ -25,9 +25,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Sürüm 2 → 3: yanıt (alıntı) ve emoji tepkileri. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN replyToId TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN replyText TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN replyAuthor TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN myReaction TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN peerReaction TEXT")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "dagmesh.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigration()
                 .build()
     }

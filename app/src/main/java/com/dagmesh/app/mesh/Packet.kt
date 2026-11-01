@@ -38,6 +38,10 @@ data class Packet(
     val media: MediaMeta? = null,
     val idx: Int = -1,
     val data: ByteArray? = null,
+    /** Yanıtlanan mesajın kimliği, kısa önizlemesi ve yazarı. */
+    val replyTo: String? = null,
+    val replyText: String? = null,
+    val replyAuthor: String? = null,
 ) {
     fun forwarded(): Packet = copy(ttl = ttl - 1, hops = hops + 1)
 
@@ -55,6 +59,9 @@ data class Packet(
         o.put("ttl", ttl)
         o.put("h", hops)
         if (idx >= 0) o.put("i", idx)
+        replyTo?.let { o.put("rp", it) }
+        replyText?.let { o.put("rt", it) }
+        replyAuthor?.let { o.put("ra", it) }
         media?.let { m ->
             o.put("k", m.kind)
             o.put("fn", m.name)
@@ -88,6 +95,7 @@ data class Packet(
         const val TYPE_AUDIO = "aud"
         const val TYPE_READ = "read"
         const val TYPE_TYPING = "typ"
+        const val TYPE_REACT = "rea"
 
         const val DEFAULT_TTL = 6
         const val ANNOUNCE_TTL = 4
@@ -141,6 +149,9 @@ data class Packet(
                 media = media,
                 idx = o.optInt("i", -1),
                 data = data,
+                replyTo = o.stringOrNull("rp"),
+                replyText = o.stringOrNull("rt"),
+                replyAuthor = o.stringOrNull("ra"),
             )
         }
 

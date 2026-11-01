@@ -26,6 +26,14 @@ data class MessageEntity(
     /** Dosya aktarımı yüzdesi (gönderirken yükleme, alırken indirme). 100 = tamam. */
     val progress: Int = 100,
     val localPath: String? = null,
+    /** Yanıtlanan mesaj (alıntı). */
+    val replyToId: String? = null,
+    val replyText: String? = null,
+    /** Alıntılanan mesajı yazanın kimliği. */
+    val replyAuthor: String? = null,
+    /** Emoji tepkileri: benimki ve karşı tarafınki. */
+    val myReaction: String? = null,
+    val peerReaction: String? = null,
 ) {
     val isMedia: Boolean get() = kind != KIND_TEXT && kind != KIND_CALL
 
