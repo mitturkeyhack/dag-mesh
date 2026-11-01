@@ -2,10 +2,12 @@ package com.dagmesh.app.mesh
 
 import android.content.Context
 import android.os.Build
+import com.dagmesh.app.call.CallManager
 import com.dagmesh.app.data.Identity
 import com.dagmesh.app.data.MeshDao
 import com.dagmesh.app.data.MessageEntity
 import com.dagmesh.app.data.PeerEntity
+import com.dagmesh.app.data.previewText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -18,7 +20,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
 
 /**
  * Ağın kalbi: çok kanallı mesh motoru.
@@ -26,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - Birden fazla kanalı (Bluetooth/Nearby, Wi‑Fi Aware) aynı anda çalıştırır.
  *   Hangi kanal karşı telefonu önce bulursa onunla bağlanılır, biri koparsa diğeri devralır.
  * - Kendine gelmeyen paketleri diğer komşularına iletir (zincirleme / mesh).
- * - Gönderilemeyen mesajları saklar, yeni biri menzile girince tekrar dener (sakla-ilet).
+ * - Gönderilemeyen mesajları ve dosyaları saklar, yeni biri menzile girince tekrar dener.
  * - Aynı paket farklı kanallardan ya da yollardan iki kez gelirse tekrarı ayıklar.
  */
 class MeshManager(
@@ -53,12 +60,17 @@ class MeshManager(
 
     private data class Link(val linkId: String, val userId: String, val transport: Transport)
 
+    val appContext: Context = context.applicationContext
+
     val transports: List<Transport> = buildList {
-        add(NearbyTransport(context, identity, this@MeshManager, scope))
+        add(NearbyTransport(appContext, identity, this@MeshManager, scope))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            add(WifiAwareTransport(context, identity, this@MeshManager, scope))
+            add(WifiAwareTransport(appContext, identity, this@MeshManager, scope))
         }
     }
+
+    val media = MediaTransfer(this, dao, scope)
+    val calls = CallManager(appContext, identity, dao, scope, this)
 
     private val _peers = MutableStateFlow<Map<String, Peer>>(emptyMap())
     val peers: StateFlow<Map<String, Peer>> = _peers.asStateFlow()
@@ -77,13 +89,13 @@ class MeshManager(
     var activeChatPeerId: String? = null
 
     private val links = ConcurrentHashMap<String, Link>()
-    private val seen = object : LinkedHashMap<String, Boolean>(512, 0.75f, true) {
+    private val seen = object : LinkedHashMap<String, Boolean>(1024, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean =
             size > SEEN_CAPACITY
     }
     private var tickerJob: Job? = null
 
-    private val myName: String get() = identity.name.value ?: "?"
+    val myName: String get() = identity.name.value ?: "?"
 
     // ---------------------------------------------------------------- başlat / durdur
 
@@ -116,10 +128,13 @@ class MeshManager(
         _running.value = false
         tickerJob?.cancel()
         tickerJob = null
+        calls.hangup()
         transports.forEach { it.stop() }
         links.clear()
         _peers.value = emptyMap()
     }
+
+    fun isDirect(userId: String): Boolean = _peers.value[userId]?.isDirect == true
 
     // ---------------------------------------------------------------- kanal olayları
 
@@ -161,18 +176,23 @@ class MeshManager(
 
     override fun onData(linkId: String, bytes: ByteArray) {
         val packet = Packet.parse(bytes) ?: return
+        // Ses kareleri gecikmeye çok duyarlı: sıraya sokmadan hemen işle.
+        if (packet.type == Packet.TYPE_AUDIO) {
+            if (packet.to == identity.userId) calls.onAudio(packet)
+            return
+        }
         scope.launch { handle(linkId, packet) }
     }
 
     override fun onTransportError(transport: Transport, message: String) {
-        // Sadece hiçbir kanal çalışmıyorsa kullanıcıya hata göster.
+        // Sadece hiçbir kanal çalışmıyorsa ya da ana kanal hata verdiyse kullanıcıya göster.
         val anyActive = transports.any { it !== transport && it.state.value == TransportState.ACTIVE }
         if (!anyActive || transport is NearbyTransport) _error.value = message
     }
 
     // ---------------------------------------------------------------- mesaj gönderme
 
-    fun sendMessage(peerId: String, text: String) {
+    fun sendText(peerId: String, text: String) {
         val clean = text.trim()
         if (clean.isEmpty()) return
         val message = MessageEntity(
@@ -191,25 +211,53 @@ class MeshManager(
         }
     }
 
+    /** Uygulama klasörüne kopyalanmış bir dosyayı gönderir. */
+    fun sendMedia(
+        messageId: String,
+        peerId: String,
+        kind: String,
+        file: File,
+        name: String,
+        mime: String,
+        durationMs: Long = 0,
+        caption: String = "",
+    ) {
+        val message = MessageEntity(
+            id = messageId,
+            peerId = peerId,
+            fromMe = true,
+            text = caption,
+            timestamp = System.currentTimeMillis(),
+            status = MessageEntity.STATUS_PENDING,
+            hops = 0,
+            isRead = true,
+            kind = kind,
+            fileName = name,
+            mime = mime,
+            size = file.length(),
+            durationMs = durationMs,
+            progress = 0,
+            localPath = file.absolutePath,
+        )
+        scope.launch {
+            dao.insertMessage(message)
+            transmit(message)
+        }
+    }
+
     /** Mesajı ağa verir. Her denemede yeni paket kimliği alır, böylece yeniden gönderim zincirde engellenmez. */
     private fun transmit(message: MessageEntity) {
+        if (message.isMedia) {
+            media.send(message)
+            return
+        }
         val targets = route(message.peerId)
         if (targets.isEmpty()) return // kimse yok: mesaj sırada bekler
-        val packet = Packet(
-            type = Packet.TYPE_MSG,
-            pid = Packet.newId(),
-            ref = message.id,
-            from = identity.userId,
-            fromName = myName,
-            to = message.peerId,
-            text = message.text,
-            ts = message.timestamp,
-            ttl = Packet.DEFAULT_TTL,
-            hops = 0,
-        )
+        val packet = newPacket(Packet.TYPE_MSG, to = message.peerId, ref = message.id, text = message.text)
+            .copy(ts = message.timestamp)
         remember(packet.pid)
-        sendTo(targets, packet.toBytes()) {
-            scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
+        sendTo(targets, packet.toBytes()) { ok ->
+            if (ok) scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
         }
     }
 
@@ -221,6 +269,8 @@ class MeshManager(
         }
     }
 
+    // ---------------------------------------------------------------- yönlendirme
+
     /** Alıcı doğrudan bağlıysa sadece ona, değilse tüm komşulara (kişi başına tek kanal). */
     private fun route(userId: String?): List<Link> {
         val directId = userId?.let { _peers.value[it]?.linkId }
@@ -229,9 +279,9 @@ class MeshManager(
         return links.values.groupBy { it.userId }.values.map { it.first() }
     }
 
-    private fun sendTo(targets: List<Link>, bytes: ByteArray, onSent: (() -> Unit)? = null) {
+    private fun sendTo(targets: List<Link>, bytes: ByteArray, onResult: ((Boolean) -> Unit)? = null) {
         targets.groupBy { it.transport }.forEach { (transport, list) ->
-            transport.send(list.map { it.linkId }, bytes, onSent)
+            transport.send(list.map { it.linkId }, bytes, onResult)
         }
     }
 
@@ -241,20 +291,77 @@ class MeshManager(
         if (targets.isNotEmpty()) sendTo(targets, packet.toBytes())
     }
 
+    /**
+     * Paketi gönderir ve karşıya iletilene kadar bekler (dosya parçalarının akış kontrolü için).
+     * Hiç bağlantı yoksa veya süre dolarsa false döner.
+     */
+    suspend fun sendAwait(packet: Packet, timeoutMs: Long = 15_000): Boolean {
+        val targets = route(packet.to)
+        if (targets.isEmpty()) return false
+        remember(packet.pid)
+        val bytes = packet.toBytes()
+        return withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine { cont ->
+                val done = AtomicBoolean(false)
+                sendTo(targets, bytes) { ok ->
+                    if (done.compareAndSet(false, true) && cont.isActive) cont.resume(ok)
+                }
+            }
+        } ?: false
+    }
+
+    /** Sadece doğrudan bağlı kişiye gönderir (arama sinyalleri ve ses için). */
+    fun sendDirect(packet: Packet): Boolean {
+        val link = packet.to?.let { _peers.value[it]?.linkId }?.let { links[it] } ?: return false
+        link.transport.send(listOf(link.linkId), packet.toBytes(), null)
+        return true
+    }
+
+    fun newPacket(
+        type: String,
+        to: String?,
+        ref: String? = null,
+        text: String? = null,
+        ttl: Int = Packet.DEFAULT_TTL,
+        media: MediaMeta? = null,
+        idx: Int = -1,
+        data: ByteArray? = null,
+        pid: String = Packet.newId(),
+    ) = Packet(
+        type = type,
+        pid = pid,
+        ref = ref,
+        from = identity.userId,
+        fromName = myName,
+        to = to,
+        text = text,
+        ts = System.currentTimeMillis(),
+        ttl = ttl,
+        hops = 0,
+        media = media,
+        idx = idx,
+        data = data,
+    )
+
+    fun sendAck(to: String, messageId: String) {
+        val ack = newPacket(Packet.TYPE_ACK, to = to, ref = messageId)
+        remember(ack.pid)
+        sendPacket(ack)
+    }
+
+    fun sendNack(to: String, messageId: String, missing: List<Int>) {
+        val nack = newPacket(Packet.TYPE_NACK, to = to, ref = messageId, text = missing.joinToString(","))
+        remember(nack.pid)
+        sendPacket(nack)
+    }
+
+    fun emitIncoming(peerId: String, peerName: String, text: String) {
+        _incoming.tryEmit(IncomingMessage(peerId, peerName, text))
+    }
+
     private fun announce() {
         if (links.isEmpty()) return
-        val packet = Packet(
-            type = Packet.TYPE_ANNOUNCE,
-            pid = Packet.newId(),
-            ref = null,
-            from = identity.userId,
-            fromName = myName,
-            to = null,
-            text = null,
-            ts = System.currentTimeMillis(),
-            ttl = Packet.ANNOUNCE_TTL,
-            hops = 0,
-        )
+        val packet = newPacket(Packet.TYPE_ANNOUNCE, to = null, ttl = Packet.ANNOUNCE_TTL)
         remember(packet.pid)
         sendPacket(packet)
     }
@@ -266,24 +373,36 @@ class MeshManager(
         if (!remember(packet.pid)) return // bu paketi daha önce işledik
 
         notePeer(packet.from, packet.fromName, packet.hops + 1)
+        val forMe = packet.to == identity.userId
 
         when (packet.type) {
             Packet.TYPE_ANNOUNCE -> forward(packet, fromLinkId)
 
-            Packet.TYPE_MSG ->
-                if (packet.to == identity.userId) receiveMessage(packet)
-                else forward(packet, fromLinkId)
+            Packet.TYPE_MSG -> when {
+                !forMe -> forward(packet, fromLinkId)
+                packet.media != null -> media.onOffer(packet)
+                else -> receiveText(packet)
+            }
+
+            Packet.TYPE_CHUNK -> if (forMe) media.onChunk(packet) else forward(packet, fromLinkId)
+
+            Packet.TYPE_NACK -> if (forMe) media.onNack(packet) else forward(packet, fromLinkId)
 
             Packet.TYPE_ACK ->
-                if (packet.to == identity.userId) {
-                    packet.ref?.let { dao.updateStatus(it, MessageEntity.STATUS_DELIVERED) }
+                if (forMe) {
+                    packet.ref?.let {
+                        dao.updateStatus(it, MessageEntity.STATUS_DELIVERED)
+                        dao.updateProgress(it, 100)
+                    }
                 } else {
                     forward(packet, fromLinkId)
                 }
+
+            Packet.TYPE_CALL -> if (forMe) calls.onSignal(packet)
         }
     }
 
-    private suspend fun receiveMessage(packet: Packet) {
+    private suspend fun receiveText(packet: Packet) {
         val messageId = packet.ref ?: return
         val inserted = dao.insertMessage(
             MessageEntity(
@@ -299,23 +418,10 @@ class MeshManager(
         ) != -1L
 
         // Mesaj daha önce gelmiş olsa bile tekrar onay gönder: gönderen onayı kaçırmış olabilir.
-        val ack = Packet(
-            type = Packet.TYPE_ACK,
-            pid = Packet.newId(),
-            ref = messageId,
-            from = identity.userId,
-            fromName = myName,
-            to = packet.from,
-            text = null,
-            ts = System.currentTimeMillis(),
-            ttl = Packet.DEFAULT_TTL,
-            hops = 0,
-        )
-        remember(ack.pid)
-        sendPacket(ack)
+        sendAck(packet.from, messageId)
 
         if (inserted) {
-            _incoming.tryEmit(IncomingMessage(packet.from, packet.fromName, packet.text.orEmpty()))
+            emitIncoming(packet.from, packet.fromName, previewText(MessageEntity.KIND_TEXT, packet.text.orEmpty(), null))
         }
     }
 
@@ -326,8 +432,10 @@ class MeshManager(
 
     private fun notePeer(userId: String, name: String, distance: Int) {
         val now = System.currentTimeMillis()
+        var isNew = false
         _peers.update { map ->
             val existing = map[userId]
+            isNew = existing == null || existing.name != name
             val updated = when {
                 existing?.isDirect == true -> existing.copy(name = name, lastSeen = now)
                 existing != null && existing.hops < distance && now - existing.lastSeen < PEER_TIMEOUT_MS ->
@@ -336,7 +444,8 @@ class MeshManager(
             }
             map + (userId to updated)
         }
-        scope.launch { dao.upsertPeer(PeerEntity(userId, name, now)) }
+        // Veritabanına her pakette değil, yeni biri ya da isim değişince yaz (dosya aktarımında yük olmasın).
+        if (isNew) scope.launch { dao.upsertPeer(PeerEntity(userId, name, now)) }
     }
 
     private fun expirePeers() {
@@ -357,6 +466,6 @@ class MeshManager(
         private const val ANNOUNCE_EVERY_TICKS = 3
         private const val PEER_TIMEOUT_MS = 100_000L
         private const val RESEND_WINDOW_MS = 48L * 60 * 60 * 1000
-        private const val SEEN_CAPACITY = 4000
+        private const val SEEN_CAPACITY = 20_000
     }
 }

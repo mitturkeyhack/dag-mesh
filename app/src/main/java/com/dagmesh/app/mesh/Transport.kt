@@ -28,8 +28,11 @@ interface Transport {
     fun start()
     fun stop()
 
-    /** Baytları verilen bağlantılara gönderir. Gönderim başarılı olunca [onSent] çağrılır. */
-    fun send(linkIds: List<String>, bytes: ByteArray, onSent: (() -> Unit)? = null)
+    /**
+     * Baytları verilen bağlantılara gönderir. Sonuç her bağlantı grubu için [onResult] ile bildirilir
+     * (true = karşı tarafa iletildi). Akış kontrolü bu sonuca dayanır, bu yüzden her durumda çağrılmalıdır.
+     */
+    fun send(linkIds: List<String>, bytes: ByteArray, onResult: ((Boolean) -> Unit)? = null)
 
     /** Bir bağlantıyı kapatır (ör. aynı kişiye ikinci bağlantı açıldıysa). */
     fun disconnect(linkId: String)

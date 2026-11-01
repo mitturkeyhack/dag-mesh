@@ -13,6 +13,9 @@ interface MeshDao {
     @Query("SELECT * FROM messages WHERE peerId = :peerId ORDER BY timestamp ASC")
     fun messages(peerId: String): Flow<List<MessageEntity>>
 
+    @Query("SELECT * FROM messages WHERE id = :id")
+    suspend fun message(id: String): MessageEntity?
+
     /** Aynı mesaj ikinci kez gelirse yok sayılır; dönen -1 bunun işaretidir. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMessage(message: MessageEntity): Long
@@ -21,7 +24,16 @@ interface MeshDao {
     @Query("UPDATE messages SET status = :status WHERE id = :id AND status < :status")
     suspend fun updateStatus(id: String, status: Int)
 
-    @Query("SELECT * FROM messages WHERE fromMe = 1 AND status < 2 AND timestamp > :since ORDER BY timestamp ASC")
+    @Query("UPDATE messages SET progress = :progress WHERE id = :id AND progress < 100")
+    suspend fun updateProgress(id: String, progress: Int)
+
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE fromMe = 1 AND status < 2 AND kind != 'call' AND timestamp > :since
+        ORDER BY timestamp ASC
+        """
+    )
     suspend fun unconfirmed(since: Long): List<MessageEntity>
 
     @Query("UPDATE messages SET isRead = 1 WHERE peerId = :peerId AND isRead = 0")
@@ -40,6 +52,8 @@ interface MeshDao {
                m.text AS lastText,
                m.timestamp AS lastTime,
                m.fromMe AS fromMe,
+               m.kind AS kind,
+               m.fileName AS fileName,
                (SELECT COUNT(*) FROM messages u
                  WHERE u.peerId = m.peerId AND u.fromMe = 0 AND u.isRead = 0) AS unread
         FROM messages m

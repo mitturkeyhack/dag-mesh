@@ -58,6 +58,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dagmesh.app.App
 import com.dagmesh.app.Permissions
 import com.dagmesh.app.data.ConversationRow
+import com.dagmesh.app.data.MessageEntity
+import com.dagmesh.app.data.previewText
 import com.dagmesh.app.mesh.MeshManager
 import com.dagmesh.app.mesh.MeshService
 import com.dagmesh.app.mesh.Transport
@@ -336,7 +338,8 @@ private fun ConversationItem(row: ConversationRow, online: Boolean, onClick: () 
             Column(Modifier.weight(1f)) {
                 Text(row.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    (if (row.fromMe) "Sen: " else "") + row.lastText,
+                    (if (row.fromMe && row.kind != MessageEntity.KIND_CALL) "Sen: " else "") +
+                        previewText(row.kind, row.lastText, row.fileName),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

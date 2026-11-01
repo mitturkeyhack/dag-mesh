@@ -12,13 +12,14 @@ import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.dagmesh.app.App
+import com.dagmesh.app.call.CallState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
-/** Ekran kapalıyken ve uygulama arka plandayken ağın çalışmaya devam etmesini sağlar. */
+/** Ekran kapalıyken ve uygulama arka plandayken ağın (ve aramaların) çalışmaya devam etmesini sağlar. */
 class MeshService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -33,20 +34,18 @@ class MeshService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_REJECT_CALL -> {
+                mesh.calls.reject()
+                if (mesh.running.value) return START_STICKY
+            }
         }
 
-        try {
-            ServiceCompat.startForeground(
-                this,
-                Notifications.STATUS_ID,
-                Notifications.status(this, 0, 0),
-                serviceType(),
-            )
-        } catch (e: Exception) {
-            Log.e("DagMesh", "Arka plan hizmeti başlatılamadı", e)
+        if (!goForeground(callActive = mesh.calls.state.value is CallState.Active)) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -62,35 +61,75 @@ class MeshService : Service() {
             }
             scope.launch {
                 mesh.incoming.collect { msg ->
-                    if (mesh.activeChatPeerId != msg.peerId) Notifications.message(this@MeshService, msg)
+                    if (mesh.activeChatPeerId != msg.peerId || !App.isInForeground) {
+                        Notifications.message(this@MeshService, msg)
+                    }
+                }
+            }
+            scope.launch {
+                var wasActive = false
+                mesh.calls.state.collect { state ->
+                    if (state is CallState.Incoming && !App.isInForeground) {
+                        Notifications.incomingCall(this@MeshService, state.peerId, state.name)
+                    } else {
+                        Notifications.cancelIncomingCall(this@MeshService)
+                    }
+                    // Arama sürerken mikrofonun ekran kapalıyken de çalışması için hizmet türünü güncelle.
+                    val active = state is CallState.Active
+                    if (active != wasActive) {
+                        wasActive = active
+                        goForeground(callActive = active)
+                    }
                 }
             }
         }
         return START_STICKY
     }
 
+    private fun goForeground(callActive: Boolean): Boolean = try {
+        ServiceCompat.startForeground(
+            this,
+            Notifications.STATUS_ID,
+            Notifications.status(this, mesh.peers.value.values.count { it.isDirect }, mesh.peers.value.size),
+            serviceType(callActive),
+        )
+        true
+    } catch (e: Exception) {
+        Log.e("DagMesh", "Arka plan hizmeti başlatılamadı", e)
+        // Mikrofon türü reddedildiyse onsuz tekrar dene.
+        if (callActive) goForeground(callActive = false) else false
+    }
+
     /**
-     * Konum izni varsa hizmet "konum" türünde de çalışır. Böylece Android, ekran kapalıyken
-     * ve uygulama arka plandayken de yakındaki cihaz taramasına izin verir.
+     * Konum izni varsa hizmet "konum" türünde de çalışır: Android, ekran kapalıyken
+     * yakındaki cihaz taramasına ancak böyle izin verir. Arama sırasında "mikrofon" da eklenir.
      */
-    private fun serviceType(): Int {
+    private fun serviceType(callActive: Boolean): Int {
         if (Build.VERSION.SDK_INT < 29) return 0
         var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        val hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        if (hasLocation) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        if (granted(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        }
+        if (callActive && Build.VERSION.SDK_INT >= 30 && granted(Manifest.permission.RECORD_AUDIO)) {
+            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
         return type
     }
+
+    private fun granted(permission: String) =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     override fun onDestroy() {
         mesh.stop()
         scope.cancel()
+        Notifications.cancelIncomingCall(this)
         super.onDestroy()
     }
 
     companion object {
         const val ACTION_STOP = "com.dagmesh.app.STOP"
         const val ACTION_RESTART = "com.dagmesh.app.RESTART"
+        const val ACTION_REJECT_CALL = "com.dagmesh.app.REJECT_CALL"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, MeshService::class.java))

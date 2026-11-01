@@ -89,12 +89,18 @@ class NearbyTransport(
         _state.value = TransportState.OFF
     }
 
-    override fun send(linkIds: List<String>, bytes: ByteArray, onSent: (() -> Unit)?) {
-        val endpoints = linkIds.map { it.removePrefix("$key:") }
-        if (endpoints.isEmpty()) return
+    override fun send(linkIds: List<String>, bytes: ByteArray, onResult: ((Boolean) -> Unit)?) {
+        val endpoints = linkIds.map { it.removePrefix("$key:") }.filter { connected.containsKey(it) }
+        if (endpoints.isEmpty()) {
+            onResult?.invoke(false)
+            return
+        }
         client.sendPayload(endpoints, Payload.fromBytes(bytes))
-            .addOnSuccessListener { onSent?.invoke() }
-            .addOnFailureListener { Log.w(TAG, "Gönderilemedi", it) }
+            .addOnSuccessListener { onResult?.invoke(true) }
+            .addOnFailureListener {
+                Log.w(TAG, "Gönderilemedi", it)
+                onResult?.invoke(false)
+            }
     }
 
     override fun disconnect(linkId: String) {

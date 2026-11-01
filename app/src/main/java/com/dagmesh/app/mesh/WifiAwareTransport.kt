@@ -429,20 +429,26 @@ class WifiAwareTransport(
         }
     }
 
-    override fun send(linkIds: List<String>, bytes: ByteArray, onSent: (() -> Unit)?) {
+    override fun send(linkIds: List<String>, bytes: ByteArray, onResult: ((Boolean) -> Unit)?) {
         for (id in linkIds) {
-            val link = links[id] ?: continue
+            val link = links[id]
+            if (link == null) {
+                onResult?.invoke(false)
+                continue
+            }
             try {
                 link.writer.execute {
                     try {
                         synchronized(link.out) { writeFrame(link.out, bytes) }
-                        onSent?.invoke()
+                        onResult?.invoke(true)
                     } catch (e: IOException) {
+                        onResult?.invoke(false)
                         close(link)
                     }
                 }
             } catch (_: Exception) {
                 // Bağlantı kapanırken yazıcı durdurulmuş olabilir.
+                onResult?.invoke(false)
             }
         }
     }
