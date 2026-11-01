@@ -1,0 +1,53 @@
+package com.dagmesh.app.data
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Upsert
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface MeshDao {
+
+    @Query("SELECT * FROM messages WHERE peerId = :peerId ORDER BY timestamp ASC")
+    fun messages(peerId: String): Flow<List<MessageEntity>>
+
+    /** Aynı mesaj ikinci kez gelirse yok sayılır; dönen -1 bunun işaretidir. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessage(message: MessageEntity): Long
+
+    /** Durum sadece ileri gider (bekliyor → gönderildi → ulaştı). */
+    @Query("UPDATE messages SET status = :status WHERE id = :id AND status < :status")
+    suspend fun updateStatus(id: String, status: Int)
+
+    @Query("SELECT * FROM messages WHERE fromMe = 1 AND status < 2 AND timestamp > :since ORDER BY timestamp ASC")
+    suspend fun unconfirmed(since: Long): List<MessageEntity>
+
+    @Query("UPDATE messages SET isRead = 1 WHERE peerId = :peerId AND isRead = 0")
+    suspend fun markRead(peerId: String)
+
+    @Upsert
+    suspend fun upsertPeer(peer: PeerEntity)
+
+    @Query("SELECT * FROM peers WHERE id = :id")
+    fun peer(id: String): Flow<PeerEntity?>
+
+    @Query(
+        """
+        SELECT m.peerId AS peerId,
+               COALESCE(p.name, m.peerId) AS name,
+               m.text AS lastText,
+               m.timestamp AS lastTime,
+               m.fromMe AS fromMe,
+               (SELECT COUNT(*) FROM messages u
+                 WHERE u.peerId = m.peerId AND u.fromMe = 0 AND u.isRead = 0) AS unread
+        FROM messages m
+        LEFT JOIN peers p ON p.id = m.peerId
+        WHERE m.timestamp = (SELECT MAX(x.timestamp) FROM messages x WHERE x.peerId = m.peerId)
+        GROUP BY m.peerId
+        ORDER BY m.timestamp DESC
+        """
+    )
+    fun conversations(): Flow<List<ConversationRow>>
+}

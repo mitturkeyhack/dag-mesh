@@ -1,0 +1,361 @@
+package com.dagmesh.app.ui
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dagmesh.app.App
+import com.dagmesh.app.Permissions
+import com.dagmesh.app.data.ConversationRow
+import com.dagmesh.app.mesh.MeshManager
+import com.dagmesh.app.mesh.MeshService
+import com.dagmesh.app.ui.theme.SectionStyle
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(onOpenChat: (String) -> Unit) {
+    val app = App.instance
+    val mesh = app.mesh
+    val context = LocalContext.current
+
+    val peersMap by mesh.peers.collectAsStateWithLifecycle()
+    val running by mesh.running.collectAsStateWithLifecycle()
+    val error by mesh.error.collectAsStateWithLifecycle()
+    val myName by app.identity.name.collectAsStateWithLifecycle()
+    val conversations by remember { app.db.dao().conversations() }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    var permsGranted by remember { mutableStateOf(Permissions.hasCore(context)) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        permsGranted = Permissions.hasCore(context)
+        if (permsGranted) MeshService.start(context)
+    }
+
+    LaunchedEffect(Unit) {
+        if (permsGranted) {
+            if (!mesh.running.value) MeshService.start(context)
+        } else {
+            permissionLauncher.launch(Permissions.required())
+        }
+    }
+
+    val peers = peersMap.values.sortedWith(compareBy({ it.hops }, { it.name.lowercase() }))
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Dağ Mesh", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            myName.orEmpty(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        when {
+                            running -> MeshService.stop(context)
+                            permsGranted -> MeshService.start(context)
+                            else -> permissionLauncher.launch(Permissions.required())
+                        }
+                    }) {
+                        Icon(
+                            Icons.Rounded.PowerSettingsNew,
+                            contentDescription = if (running) "Ağı kapat" else "Ağı aç",
+                            tint = if (running) MaterialTheme.colorScheme.secondary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = padding.calculateTopPadding() + 4.dp,
+                bottom = padding.calculateBottomPadding() + 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item(key = "radar") { RadarCard(peers, running) }
+
+            if (!permsGranted) {
+                item(key = "perm") {
+                    PermissionCard { permissionLauncher.launch(Permissions.required()) }
+                }
+            }
+            error?.let { message ->
+                item(key = "error") { ErrorCard(message) }
+            }
+
+            item(key = "h-near") { SectionHeader("YAKINDAKİLER", peers.size) }
+            if (peers.isEmpty()) {
+                item(key = "empty") {
+                    EmptyHint(
+                        if (running) "Etrafta Dağ Mesh açık bir telefon aranıyor…\nBluetooth, Wi‑Fi ve Konum açık olmalı."
+                        else "Ağ kapalı. Açmak için sağ üstteki düğmeye dokun."
+                    )
+                }
+            }
+            items(peers, key = { "p-" + it.id }) { peer ->
+                PeerRow(peer) { onOpenChat(peer.id) }
+            }
+
+            if (conversations.isNotEmpty()) {
+                item(key = "h-chats") { SectionHeader("SOHBETLER", null) }
+                items(conversations, key = { "c-" + it.peerId }) { row ->
+                    ConversationItem(row, online = peersMap[row.peerId] != null) { onOpenChat(row.peerId) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean) {
+    val direct = peers.count { it.isDirect }
+    val relayed = peers.size - direct
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(28.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Radar(peers, running, Modifier.fillMaxWidth(0.82f))
+            Spacer(Modifier.height(16.dp))
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (running) MaterialTheme.colorScheme.secondary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                )
+                Text(
+                    when {
+                        !running -> "Ağ kapalı"
+                        peers.isEmpty() -> "Taranıyor"
+                        relayed == 0 -> "$direct doğrudan bağlı"
+                        else -> "$direct doğrudan · $relayed zincirle"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, count: Int?) {
+    Row(
+        Modifier.padding(start = 4.dp, top = 14.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = SectionStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (count != null && count > 0) {
+            Spacer(Modifier.width(8.dp))
+            Text("$count", style = SectionStyle, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
+private fun PeerRow(peer: MeshManager.Peer, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Avatar(peer.id, peer.name, online = peer.isDirect)
+            Column(Modifier.weight(1f)) {
+                Text(peer.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    peerStatus(peer),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (peer.isDirect) MaterialTheme.colorScheme.secondary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SignalBars(peer.hops)
+        }
+    }
+}
+
+@Composable
+private fun ConversationItem(row: ConversationRow, online: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Avatar(row.peerId, row.name, online = online)
+            Column(Modifier.weight(1f)) {
+                Text(row.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    (if (row.fromMe) "Sen: " else "") + row.lastText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    formatTime(row.lastTime),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (row.unread > 0) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (row.unread > 0) {
+                    Box(
+                        Modifier
+                            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.primary)
+                            .padding(horizontal = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "${row.unread}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionCard(onGrant: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Rounded.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("İzin gerekiyor", style = MaterialTheme.typography.titleMedium)
+            }
+            Text(
+                "Yakındaki telefonları bulmak için Bluetooth, yakındaki cihazlar ve konum izni lazım. Konumun hiçbir yere gönderilmez.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Button(onClick = onGrant, shape = RoundedCornerShape(14.dp)) { Text("İzin ver") }
+        }
+    }
+}
+
+@Composable
+private fun ErrorCard(message: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun EmptyHint(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 20.dp, horizontal = 12.dp),
+    )
+}
