@@ -63,6 +63,7 @@ import com.dagmesh.app.data.MessageEntity
 import com.dagmesh.app.data.previewText
 import com.dagmesh.app.mesh.MeshManager
 import com.dagmesh.app.mesh.MeshService
+import com.dagmesh.app.update.Updater
 import com.dagmesh.app.mesh.Transport
 import com.dagmesh.app.mesh.TransportState
 import com.dagmesh.app.ui.theme.SectionStyle
@@ -112,6 +113,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
 
     val peers = peersMap.values.sortedWith(compareBy({ it.hops }, { it.name.lowercase() }))
     val powerMode by app.settings.powerMode.collectAsStateWithLifecycle()
+    val updateState by Updater.state.collectAsStateWithLifecycle()
     var showShare by remember { mutableStateOf(false) }
     var showPower by remember { mutableStateOf(false) }
 
@@ -165,6 +167,12 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "radar") { RadarCard(peers, running) }
+
+            if (updateState is Updater.State.Downloading || updateState is Updater.State.Installing ||
+                updateState is Updater.State.NeedsConfirm
+            ) {
+                item(key = "update") { UpdateBanner() }
+            }
 
             if (!permsGranted) {
                 item(key = "perm") {

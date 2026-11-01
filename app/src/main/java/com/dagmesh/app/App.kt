@@ -11,6 +11,7 @@ import com.dagmesh.app.data.Identity
 import com.dagmesh.app.data.Settings
 import com.dagmesh.app.mesh.MeshManager
 import com.dagmesh.app.share.ApkShare
+import com.dagmesh.app.update.Updater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +38,7 @@ class App : Application(), ImageLoaderFactory {
         db = AppDatabase.build(this)
         settings = Settings(this)
         mesh = MeshManager(this, identity, settings, db.dao(), scope)
+        Updater.schedule(this)
     }
 
     /** Fotoğraf ve video küçük resimleri için görsel yükleyici. */

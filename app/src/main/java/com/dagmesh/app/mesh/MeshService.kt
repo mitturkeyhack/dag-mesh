@@ -86,19 +86,22 @@ class MeshService : Service() {
         return START_STICKY
     }
 
-    private fun goForeground(callActive: Boolean): Boolean = try {
+    private fun goForeground(callActive: Boolean, minimal: Boolean = false): Boolean = try {
         ServiceCompat.startForeground(
             this,
             Notifications.STATUS_ID,
             Notifications.status(this, mesh.peers.value.values.count { it.isDirect }, mesh.peers.value.size),
-            serviceType(callActive),
+            if (minimal) baseType() else serviceType(callActive),
         )
         true
     } catch (e: Exception) {
         Log.e("DagMesh", "Arka plan hizmeti başlatılamadı", e)
-        // Mikrofon türü reddedildiyse onsuz tekrar dene.
-        if (callActive) goForeground(callActive = false) else false
+        // Konum/mikrofon türü reddedildiyse (ör. uygulama arka plandayken başlatıldıysa) en temel türle dene.
+        if (!minimal) goForeground(callActive = false, minimal = true) else false
     }
+
+    private fun baseType(): Int =
+        if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
 
     /**
      * Konum izni varsa hizmet "konum" türünde de çalışır: Android, ekran kapalıyken

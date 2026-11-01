@@ -65,6 +65,11 @@ import com.dagmesh.app.App
 import com.dagmesh.app.media.MediaFiles
 import com.dagmesh.app.share.ApkShare
 import com.dagmesh.app.share.Qr
+import com.dagmesh.app.update.Updater
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import java.io.File
 
 /** "Uygulamayı paylaş" alt sayfası: QR ile ya da Quick Share/Bluetooth ile. */
@@ -130,6 +135,7 @@ fun ShareSheet(onDismiss: () -> Unit) {
                     Toast.makeText(context, "Paylaşım menüsü açılamadı", Toast.LENGTH_SHORT).show()
                 }
             }
+            UpdateRow(version)
         }
     }
 
@@ -392,5 +398,47 @@ private fun InfoRow(label: String, value: String) {
     ) {
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
         Text(value, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+
+/** Sürüm bilgisi + elle güncelleme kontrolü. */
+@Composable
+private fun UpdateRow(version: String) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val state by Updater.state.collectAsStateWithLifecycle()
+    val status = when (val s = state) {
+        Updater.State.Checking -> "Kontrol ediliyor…"
+        Updater.State.UpToDate -> "En güncel sürümdesin"
+        is Updater.State.Downloading -> "İndiriliyor %${s.percent}"
+        is Updater.State.Installing -> "Kuruluyor…"
+        is Updater.State.NeedsConfirm -> "Hazır · onay bekliyor"
+        is Updater.State.Failed -> s.message
+        Updater.State.Idle -> "İnternet bulunca kendiliğinden güncellenir"
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.SystemUpdate, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Sürüm ${version.ifBlank { "?" }}", style = MaterialTheme.typography.labelLarge)
+            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (state is Updater.State.NeedsConfirm) {
+            TextButton(onClick = { Updater.confirm(context) }) { Text("Yükle") }
+        } else {
+            TextButton(
+                enabled = state !is Updater.State.Checking && state !is Updater.State.Downloading && state !is Updater.State.Installing,
+                onClick = { scope.launch { Updater.checkAndInstall(context.applicationContext, userInitiated = true) } },
+            ) { Text("Denetle") }
+        }
     }
 }
