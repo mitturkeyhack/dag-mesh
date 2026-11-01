@@ -16,7 +16,7 @@ Her sürüm aynı imzayla çıktığı için yeni APK eskisinin üstüne kurulur
 
 ## Yol haritası
 
-1. ✅ Yakındakileri bulma, metin mesajı, zincirleme aktarım, sakla‑ilet
+1. ✅ Yakındakileri bulma (Bluetooth + Wi‑Fi Direct + Wi‑Fi Aware), metin mesajı, zincirleme aktarım, sakla‑ilet
 2. Sesli mesaj, fotoğraf, dosya, video
 3. Uçtan uca şifreleme, QR ile kişi ekleme
 4. SOS acil durum yayını, çevrimdışı harita ve konum paylaşımı

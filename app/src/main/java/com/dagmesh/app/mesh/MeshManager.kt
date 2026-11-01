@@ -1,24 +1,11 @@
 package com.dagmesh.app.mesh
 
 import android.content.Context
-import android.util.Log
+import android.os.Build
 import com.dagmesh.app.data.Identity
 import com.dagmesh.app.data.MeshDao
 import com.dagmesh.app.data.MessageEntity
 import com.dagmesh.app.data.PeerEntity
-import com.google.android.gms.nearby.Nearby
-import com.google.android.gms.nearby.connection.AdvertisingOptions
-import com.google.android.gms.nearby.connection.ConnectionInfo
-import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
-import com.google.android.gms.nearby.connection.ConnectionResolution
-import com.google.android.gms.nearby.connection.ConnectionsClient
-import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo
-import com.google.android.gms.nearby.connection.DiscoveryOptions
-import com.google.android.gms.nearby.connection.EndpointDiscoveryCallback
-import com.google.android.gms.nearby.connection.Payload
-import com.google.android.gms.nearby.connection.PayloadCallback
-import com.google.android.gms.nearby.connection.PayloadTransferUpdate
-import com.google.android.gms.nearby.connection.Strategy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,33 +21,44 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Ağın kalbi.
+ * Ağın kalbi: çok kanallı mesh motoru.
  *
- * - Google Nearby Connections ile aynı anda hem yayın yapar hem tarar (Bluetooth, BLE, Wi‑Fi Direct, hotspot).
- * - Bulduğu her Dağ Mesh telefonuna otomatik bağlanır.
+ * - Birden fazla kanalı (Bluetooth/Nearby, Wi‑Fi Aware) aynı anda çalıştırır.
+ *   Hangi kanal karşı telefonu önce bulursa onunla bağlanılır, biri koparsa diğeri devralır.
  * - Kendine gelmeyen paketleri diğer komşularına iletir (zincirleme / mesh).
  * - Gönderilemeyen mesajları saklar, yeni biri menzile girince tekrar dener (sakla-ilet).
+ * - Aynı paket farklı kanallardan ya da yollardan iki kez gelirse tekrarı ayıklar.
  */
 class MeshManager(
     context: Context,
     private val identity: Identity,
     private val dao: MeshDao,
     private val scope: CoroutineScope,
-) {
+) : LinkListener {
+
     data class Peer(
         val id: String,
         val name: String,
         /** 1 = doğrudan bağlı, 2 = bir telefon aradan, ... */
         val hops: Int,
         val lastSeen: Long,
-        val endpointId: String?,
+        val linkId: String?,
+        /** Doğrudan bağlıysa hangi kanalla bağlı olduğu. */
+        val via: String?,
     ) {
-        val isDirect: Boolean get() = endpointId != null
+        val isDirect: Boolean get() = linkId != null
     }
 
     data class IncomingMessage(val peerId: String, val peerName: String, val text: String)
 
-    private val client: ConnectionsClient = Nearby.getConnectionsClient(context.applicationContext)
+    private data class Link(val linkId: String, val userId: String, val transport: Transport)
+
+    val transports: List<Transport> = buildList {
+        add(NearbyTransport(context, identity, this@MeshManager, scope))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            add(WifiAwareTransport(context, identity, this@MeshManager, scope))
+        }
+    }
 
     private val _peers = MutableStateFlow<Map<String, Peer>>(emptyMap())
     val peers: StateFlow<Map<String, Peer>> = _peers.asStateFlow()
@@ -78,10 +76,7 @@ class MeshManager(
     @Volatile
     var activeChatPeerId: String? = null
 
-    private val endpointToUser = ConcurrentHashMap<String, String>()
-    private val initiatedNames = ConcurrentHashMap<String, String>()
-    private val discovered = ConcurrentHashMap<String, String>()
-    private val requested: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val links = ConcurrentHashMap<String, Link>()
     private val seen = object : LinkedHashMap<String, Boolean>(512, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean =
             size > SEEN_CAPACITY
@@ -89,7 +84,6 @@ class MeshManager(
     private var tickerJob: Job? = null
 
     private val myName: String get() = identity.name.value ?: "?"
-    private val myEndpointName: String get() = "${identity.userId}|$myName"
 
     // ---------------------------------------------------------------- başlat / durdur
 
@@ -97,26 +91,14 @@ class MeshManager(
         if (_running.value) return
         _running.value = true
         _error.value = null
-
-        client.startAdvertising(
-            myEndpointName,
-            SERVICE_ID,
-            lifecycleCallback,
-            AdvertisingOptions.Builder().setStrategy(STRATEGY).build(),
-        ).addOnFailureListener { onError("Yayın başlatılamadı", it) }
-
-        client.startDiscovery(
-            SERVICE_ID,
-            discoveryCallback,
-            DiscoveryOptions.Builder().setStrategy(STRATEGY).build(),
-        ).addOnFailureListener { onError("Tarama başlatılamadı", it) }
+        transports.forEach { it.start() }
 
         tickerJob = scope.launch {
             var tick = 0
             while (isActive) {
                 delay(TICK_MS)
                 tick++
-                retryDiscovered()
+                transports.forEach { it.tick() }
                 expirePeers()
                 if (tick % ANNOUNCE_EVERY_TICKS == 0) announce()
             }
@@ -134,14 +116,58 @@ class MeshManager(
         _running.value = false
         tickerJob?.cancel()
         tickerJob = null
-        client.stopAdvertising()
-        client.stopDiscovery()
-        client.stopAllEndpoints()
-        endpointToUser.clear()
-        initiatedNames.clear()
-        discovered.clear()
-        requested.clear()
+        transports.forEach { it.stop() }
+        links.clear()
         _peers.value = emptyMap()
+    }
+
+    // ---------------------------------------------------------------- kanal olayları
+
+    override fun isConnected(userId: String): Boolean = links.values.any { it.userId == userId }
+
+    override fun onLinkUp(transport: Transport, linkId: String, userId: String, userName: String) {
+        if (isConnected(userId)) {
+            // Bu kişiye başka bir kanaldan zaten bağlıyız; fazlasını kapat.
+            transport.disconnect(linkId)
+            return
+        }
+        links[linkId] = Link(linkId, userId, transport)
+        val now = System.currentTimeMillis()
+        _peers.update { it + (userId to Peer(userId, userName, 1, now, linkId, transport.label)) }
+        if (_error.value != null && transport.state.value == TransportState.ACTIVE) _error.value = null
+
+        scope.launch {
+            dao.upsertPeer(PeerEntity(userId, userName, now))
+            announce()
+            flushPending()
+        }
+    }
+
+    override fun onLinkDown(linkId: String) {
+        val link = links.remove(linkId) ?: return
+        val replacement = links.values.firstOrNull { it.userId == link.userId }
+        _peers.update { map ->
+            val peer = map[link.userId]
+            when {
+                peer == null || peer.linkId != linkId -> map
+                replacement != null -> map + (link.userId to peer.copy(
+                    linkId = replacement.linkId,
+                    via = replacement.transport.label,
+                ))
+                else -> map - link.userId
+            }
+        }
+    }
+
+    override fun onData(linkId: String, bytes: ByteArray) {
+        val packet = Packet.parse(bytes) ?: return
+        scope.launch { handle(linkId, packet) }
+    }
+
+    override fun onTransportError(transport: Transport, message: String) {
+        // Sadece hiçbir kanal çalışmıyorsa kullanıcıya hata göster.
+        val anyActive = transports.any { it !== transport && it.state.value == TransportState.ACTIVE }
+        if (!anyActive || transport is NearbyTransport) _error.value = message
     }
 
     // ---------------------------------------------------------------- mesaj gönderme
@@ -182,11 +208,9 @@ class MeshManager(
             hops = 0,
         )
         remember(packet.pid)
-        client.sendPayload(targets, Payload.fromBytes(packet.toBytes()))
-            .addOnSuccessListener {
-                scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
-            }
-            .addOnFailureListener { Log.w(TAG, "Mesaj gönderilemedi", it) }
+        sendTo(targets, packet.toBytes()) {
+            scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
+        }
     }
 
     private suspend fun flushPending() {
@@ -197,21 +221,28 @@ class MeshManager(
         }
     }
 
-    /** Alıcı doğrudan bağlıysa sadece ona, değilse tüm komşulara gönder. */
-    private fun route(userId: String?): List<String> {
-        val direct = userId?.let { _peers.value[it]?.endpointId }
-        return if (direct != null) listOf(direct) else endpointToUser.keys.toList()
+    /** Alıcı doğrudan bağlıysa sadece ona, değilse tüm komşulara (kişi başına tek kanal). */
+    private fun route(userId: String?): List<Link> {
+        val directId = userId?.let { _peers.value[it]?.linkId }
+        val direct = directId?.let { links[it] }
+        if (direct != null) return listOf(direct)
+        return links.values.groupBy { it.userId }.values.map { it.first() }
     }
 
-    private fun sendPacket(packet: Packet, except: String? = null) {
-        val targets = route(packet.to).filter { it != except }
-        if (targets.isEmpty()) return
-        client.sendPayload(targets, Payload.fromBytes(packet.toBytes()))
-            .addOnFailureListener { Log.w(TAG, "Paket gönderilemedi", it) }
+    private fun sendTo(targets: List<Link>, bytes: ByteArray, onSent: (() -> Unit)? = null) {
+        targets.groupBy { it.transport }.forEach { (transport, list) ->
+            transport.send(list.map { it.linkId }, bytes, onSent)
+        }
+    }
+
+    private fun sendPacket(packet: Packet, exceptLinkId: String? = null) {
+        val exceptUser = exceptLinkId?.let { links[it]?.userId }
+        val targets = route(packet.to).filter { it.linkId != exceptLinkId && it.userId != exceptUser }
+        if (targets.isNotEmpty()) sendTo(targets, packet.toBytes())
     }
 
     private fun announce() {
-        if (endpointToUser.isEmpty()) return
+        if (links.isEmpty()) return
         val packet = Packet(
             type = Packet.TYPE_ANNOUNCE,
             pid = Packet.newId(),
@@ -230,24 +261,24 @@ class MeshManager(
 
     // ---------------------------------------------------------------- gelen paketler
 
-    private suspend fun handle(fromEndpoint: String, packet: Packet) {
+    private suspend fun handle(fromLinkId: String, packet: Packet) {
         if (packet.from == identity.userId) return
         if (!remember(packet.pid)) return // bu paketi daha önce işledik
 
         notePeer(packet.from, packet.fromName, packet.hops + 1)
 
         when (packet.type) {
-            Packet.TYPE_ANNOUNCE -> forward(packet, fromEndpoint)
+            Packet.TYPE_ANNOUNCE -> forward(packet, fromLinkId)
 
             Packet.TYPE_MSG ->
                 if (packet.to == identity.userId) receiveMessage(packet)
-                else forward(packet, fromEndpoint)
+                else forward(packet, fromLinkId)
 
             Packet.TYPE_ACK ->
                 if (packet.to == identity.userId) {
                     packet.ref?.let { dao.updateStatus(it, MessageEntity.STATUS_DELIVERED) }
                 } else {
-                    forward(packet, fromEndpoint)
+                    forward(packet, fromLinkId)
                 }
         }
     }
@@ -288,9 +319,9 @@ class MeshManager(
         }
     }
 
-    private fun forward(packet: Packet, fromEndpoint: String) {
+    private fun forward(packet: Packet, fromLinkId: String) {
         if (packet.ttl <= 0) return
-        sendPacket(packet.forwarded(), except = fromEndpoint)
+        sendPacket(packet.forwarded(), exceptLinkId = fromLinkId)
     }
 
     private fun notePeer(userId: String, name: String, distance: Int) {
@@ -301,7 +332,7 @@ class MeshManager(
                 existing?.isDirect == true -> existing.copy(name = name, lastSeen = now)
                 existing != null && existing.hops < distance && now - existing.lastSeen < PEER_TIMEOUT_MS ->
                     existing.copy(name = name, lastSeen = now)
-                else -> Peer(userId, name, distance, now, null)
+                else -> Peer(userId, name, distance, now, null, null)
             }
             map + (userId to updated)
         }
@@ -321,120 +352,10 @@ class MeshManager(
         }
     }
 
-    // ---------------------------------------------------------------- bağlantı yönetimi
-
-    private fun requestIfNeeded(endpointId: String, userId: String) {
-        if (!_running.value) return
-        if (endpointToUser.containsKey(endpointId) || endpointToUser.containsValue(userId)) return
-        if (!requested.add(endpointId)) return
-        client.requestConnection(myEndpointName, endpointId, lifecycleCallback)
-            .addOnFailureListener {
-                requested.remove(endpointId)
-                Log.d(TAG, "Bağlantı isteği başarısız: $endpointId", it)
-            }
-    }
-
-    private fun retryDiscovered() {
-        for ((endpointId, userId) in discovered) requestIfNeeded(endpointId, userId)
-    }
-
-    private val discoveryCallback = object : EndpointDiscoveryCallback() {
-        override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            if (info.serviceId != SERVICE_ID) return
-            val (userId, _) = parseEndpointName(info.endpointName) ?: return
-            if (userId == identity.userId) return
-            discovered[endpointId] = userId
-            scope.launch {
-                // İki telefon aynı anda istek atmasın: kimliği büyük olan biraz bekler.
-                if (identity.userId > userId) delay(REQUEST_BACKOFF_MS)
-                requestIfNeeded(endpointId, userId)
-            }
-        }
-
-        override fun onEndpointLost(endpointId: String) {
-            discovered.remove(endpointId)
-            requested.remove(endpointId)
-        }
-    }
-
-    private val lifecycleCallback = object : ConnectionLifecycleCallback() {
-        override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            initiatedNames[endpointId] = info.endpointName
-            client.acceptConnection(endpointId, payloadCallback)
-                .addOnFailureListener { Log.d(TAG, "Bağlantı kabul edilemedi", it) }
-        }
-
-        override fun onConnectionResult(endpointId: String, resolution: ConnectionResolution) {
-            requested.remove(endpointId)
-            val endpointName = initiatedNames.remove(endpointId)
-            if (!resolution.status.isSuccess) return
-            val (userId, userName) = endpointName?.let { parseEndpointName(it) } ?: return
-
-            if (endpointToUser.containsValue(userId)) {
-                // Aynı kişiye ikinci bir bağlantı oluştu, fazlasını kapat.
-                client.disconnectFromEndpoint(endpointId)
-                return
-            }
-            endpointToUser[endpointId] = userId
-            val now = System.currentTimeMillis()
-            _peers.update { it + (userId to Peer(userId, userName, 1, now, endpointId)) }
-
-            scope.launch {
-                dao.upsertPeer(PeerEntity(userId, userName, now))
-                announce()
-                flushPending()
-            }
-        }
-
-        override fun onDisconnected(endpointId: String) {
-            val userId = endpointToUser.remove(endpointId) ?: return
-            _peers.update { map ->
-                if (map[userId]?.endpointId == endpointId) map - userId else map
-            }
-        }
-    }
-
-    private val payloadCallback = object : PayloadCallback() {
-        override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            if (payload.type != Payload.Type.BYTES) return
-            val bytes = payload.asBytes() ?: return
-            val packet = Packet.parse(bytes) ?: return
-            scope.launch { handle(endpointId, packet) }
-        }
-
-        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) = Unit
-    }
-
-    private fun onError(message: String, e: Exception) {
-        Log.e(TAG, message, e)
-        _error.value = "$message (${e.message ?: "bilinmeyen hata"})"
-        // Geçici hatalarda bir kez kendiliğinden tekrar dene.
-        if (!autoRetried) {
-            autoRetried = true
-            scope.launch {
-                delay(4_000)
-                if (_running.value && _error.value != null) restart()
-            }
-        }
-    }
-
-    private var autoRetried = false
-
-    private fun parseEndpointName(raw: String): Pair<String, String>? {
-        val i = raw.indexOf('|')
-        if (i <= 0) return null
-        return raw.substring(0, i) to raw.substring(i + 1).ifBlank { "?" }
-    }
-
     companion object {
-        private const val TAG = "DagMesh"
-        const val SERVICE_ID = "com.dagmesh.app.MESH"
-        private val STRATEGY: Strategy = Strategy.P2P_CLUSTER
-
         private const val TICK_MS = 10_000L
         private const val ANNOUNCE_EVERY_TICKS = 3
         private const val PEER_TIMEOUT_MS = 100_000L
-        private const val REQUEST_BACKOFF_MS = 2_500L
         private const val RESEND_WINDOW_MS = 48L * 60 * 60 * 1000
         private const val SEEN_CAPACITY = 4000
     }

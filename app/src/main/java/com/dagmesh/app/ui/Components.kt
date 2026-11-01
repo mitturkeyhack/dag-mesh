@@ -96,7 +96,7 @@ fun SignalBars(hops: Int, modifier: Modifier = Modifier) {
 
 fun peerStatus(peer: MeshManager.Peer?): String = when {
     peer == null -> "Menzil dışında · mesajlar sırada bekler"
-    peer.isDirect -> "Doğrudan bağlı"
+    peer.isDirect -> "Doğrudan bağlı" + (peer.via?.let { " · $it" } ?: "")
     else -> "${peer.hops - 1} telefon aracılığıyla ulaşılıyor"
 }
 

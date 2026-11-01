@@ -60,6 +60,8 @@ import com.dagmesh.app.Permissions
 import com.dagmesh.app.data.ConversationRow
 import com.dagmesh.app.mesh.MeshManager
 import com.dagmesh.app.mesh.MeshService
+import com.dagmesh.app.mesh.Transport
+import com.dagmesh.app.mesh.TransportState
 import com.dagmesh.app.ui.theme.SectionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -238,7 +240,40 @@ private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean) {
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
+            if (running) {
+                Spacer(Modifier.height(14.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    App.instance.mesh.transports.forEach { ChannelRow(it) }
+                }
+            }
         }
+    }
+}
+
+/** Bir arama kanalının durum satırı: renkli nokta + ad + durum. */
+@Composable
+private fun ChannelRow(transport: Transport) {
+    val state by transport.state.collectAsStateWithLifecycle()
+    val (color, text) = when (state) {
+        TransportState.ACTIVE -> MaterialTheme.colorScheme.secondary to "açık"
+        TransportState.STARTING -> MaterialTheme.colorScheme.primary to "başlıyor"
+        TransportState.UNAVAILABLE -> MaterialTheme.colorScheme.primary to "Wi‑Fi kapalı"
+        TransportState.UNSUPPORTED -> MaterialTheme.colorScheme.outline to "bu telefonda yok"
+        TransportState.ERROR -> MaterialTheme.colorScheme.error to "hata"
+        TransportState.OFF -> MaterialTheme.colorScheme.outline to "kapalı"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Text(
+            "${transport.label}: $text",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
