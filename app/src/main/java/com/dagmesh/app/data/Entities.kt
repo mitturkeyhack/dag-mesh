@@ -12,7 +12,7 @@ data class MessageEntity(
     /** Metin mesajında metnin kendisi, medyada açıklama (boş olabilir), aramada arama özeti. */
     val text: String,
     val timestamp: Long,
-    /** Giden mesajlar için: 0 sırada bekliyor, 1 ağa verildi, 2 karşıya ulaştı. */
+    /** Giden mesajlar için: 0 sırada bekliyor, 1 ağa verildi, 2 karşıya ulaştı, 3 okundu. */
     val status: Int,
     /** Gelen mesaj kaç telefon üzerinden aktarılarak geldi (0 = doğrudan). */
     val hops: Int,
@@ -33,6 +33,7 @@ data class MessageEntity(
         const val STATUS_PENDING = 0
         const val STATUS_SENT = 1
         const val STATUS_DELIVERED = 2
+        const val STATUS_READ = 3
 
         const val KIND_TEXT = "text"
         const val KIND_IMAGE = "image"

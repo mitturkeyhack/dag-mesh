@@ -240,7 +240,7 @@ class MediaTransfer(
         timestamp = System.currentTimeMillis(),
         status = MessageEntity.STATUS_DELIVERED,
         hops = packet.hops,
-        isRead = mesh.activeChatPeerId == packet.from,
+        isRead = false,
         kind = meta.kind,
         fileName = meta.name,
         mime = meta.mime,

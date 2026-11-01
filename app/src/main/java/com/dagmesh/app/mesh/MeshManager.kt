@@ -91,6 +91,11 @@ class MeshManager(
     @Volatile
     var activeChatPeerId: String? = null
 
+    /** Kim bize yazıyor: kişi → "yazıyor" gösteriminin bitiş zamanı. */
+    private val _typing = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val typing: StateFlow<Map<String, Long>> = _typing.asStateFlow()
+    private val lastTypingSent = ConcurrentHashMap<String, Long>()
+
     private val links = ConcurrentHashMap<String, Link>()
     private val seen = object : LinkedHashMap<String, Boolean>(1024, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean =
@@ -360,6 +365,46 @@ class MeshManager(
         sendPacket(nack)
     }
 
+    /**
+     * Sohbet ekranı açıkken çağrılır: okunmamış mesajları okundu yapar ve gönderene
+     * "okundu" bilgisi yollar (mavi çift tik).
+     */
+    suspend fun markConversationRead(peerId: String) {
+        val ids = dao.unreadIncomingIds(peerId)
+        dao.markRead(peerId)
+        if (ids.isEmpty()) return
+        ids.chunked(40).forEach { batch ->
+            val packet = newPacket(Packet.TYPE_READ, to = peerId, text = batch.joinToString(","))
+            remember(packet.pid)
+            sendPacket(packet)
+        }
+    }
+
+    /** Yazarken çağrılır; karşı tarafa en fazla 3 sn'de bir "yazıyor" sinyali gider. */
+    fun notifyTyping(peerId: String) {
+        val now = System.currentTimeMillis()
+        if (now - (lastTypingSent[peerId] ?: 0L) < TYPING_SEND_INTERVAL_MS) return
+        lastTypingSent[peerId] = now
+        val packet = newPacket(Packet.TYPE_TYPING, to = peerId, ttl = 2)
+        remember(packet.pid)
+        sendPacket(packet)
+    }
+
+    private fun clearTyping(peerId: String) {
+        _typing.update { it - peerId }
+    }
+
+    /** Mesajı sadece bu telefondan siler (dosyası varsa onu da). */
+    fun deleteLocal(message: MessageEntity) {
+        scope.launch {
+            dao.delete(message.id)
+            message.localPath?.let { path ->
+                val file = File(path)
+                if (file.parentFile?.name == "media") file.delete()
+            }
+        }
+    }
+
     fun emitIncoming(peerId: String, peerName: String, text: String) {
         _incoming.tryEmit(IncomingMessage(peerId, peerName, text))
     }
@@ -404,6 +449,20 @@ class MeshManager(
                 }
 
             Packet.TYPE_CALL -> if (forMe) calls.onSignal(packet)
+
+            Packet.TYPE_READ ->
+                if (forMe) {
+                    packet.text?.split(',')?.forEach { id -> if (id.isNotBlank()) dao.markReadByPeer(id.trim()) }
+                } else {
+                    forward(packet, fromLinkId)
+                }
+
+            Packet.TYPE_TYPING ->
+                if (forMe) {
+                    _typing.update { it + (packet.from to System.currentTimeMillis() + TYPING_SHOW_MS) }
+                } else {
+                    forward(packet, fromLinkId)
+                }
         }
     }
 
@@ -418,9 +477,10 @@ class MeshManager(
                 timestamp = System.currentTimeMillis(),
                 status = MessageEntity.STATUS_DELIVERED,
                 hops = packet.hops,
-                isRead = activeChatPeerId == packet.from,
+                isRead = false,
             )
         ) != -1L
+        clearTyping(packet.from)
 
         // Mesaj daha önce gelmiş olsa bile tekrar onay gönder: gönderen onayı kaçırmış olabilir.
         sendAck(packet.from, messageId)
@@ -472,5 +532,7 @@ class MeshManager(
         private const val PEER_TIMEOUT_MS = 100_000L
         private const val RESEND_WINDOW_MS = 48L * 60 * 60 * 1000
         private const val SEEN_CAPACITY = 20_000
+        private const val TYPING_SHOW_MS = 5_000L
+        private const val TYPING_SEND_INTERVAL_MS = 3_000L
     }
 }

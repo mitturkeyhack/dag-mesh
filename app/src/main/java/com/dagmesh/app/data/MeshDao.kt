@@ -39,6 +39,17 @@ interface MeshDao {
     @Query("UPDATE messages SET isRead = 1 WHERE peerId = :peerId AND isRead = 0")
     suspend fun markRead(peerId: String)
 
+    /** Okunmamış gelen mesajların kimlikleri (okundu bilgisi göndermek için). */
+    @Query("SELECT id FROM messages WHERE peerId = :peerId AND fromMe = 0 AND isRead = 0 AND kind != 'call'")
+    suspend fun unreadIncomingIds(peerId: String): List<String>
+
+    /** Sadece kendi gönderdiğimiz mesajı "okundu" yapar. */
+    @Query("UPDATE messages SET status = 3 WHERE id = :id AND fromMe = 1 AND status < 3")
+    suspend fun markReadByPeer(id: String)
+
+    @Query("DELETE FROM messages WHERE id = :id")
+    suspend fun delete(id: String)
+
     @Upsert
     suspend fun upsertPeer(peer: PeerEntity)
 

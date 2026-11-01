@@ -1,6 +1,20 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package com.dagmesh.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,11 +63,31 @@ import com.dagmesh.app.media.MediaFiles
 import com.dagmesh.app.media.VoicePlayer
 import java.io.File
 
-/** Bir sohbet mesajı: metin, fotoğraf, video, sesli mesaj, dosya veya arama kaydı. */
+private val ReadBlue = Color(0xFF4FB3FF)
+
+/** Bir sohbet mesajı: metin, fotoğraf, video, sesli mesaj, dosya veya arama kaydı. Basılı tutunca menü açılır. */
 @Composable
-fun MessageBubble(message: MessageEntity, onOpenImage: (String) -> Unit) {
+fun MessageBubble(message: MessageEntity, onOpenImage: (String) -> Unit, onDelete: (MessageEntity) -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val openMenu = { menuOpen = true }
+
     if (message.kind == MessageEntity.KIND_CALL) {
-        CallLogChip(message)
+        Box(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                        onLongClick = openMenu,
+                    )
+            ) {
+                CallLogChip(message)
+                BubbleMenu(menuOpen, message, onDismiss = { menuOpen = false }, onCopy = null, onDelete = onDelete)
+            }
+        }
         return
     }
     val mine = message.fromMe
@@ -62,34 +96,80 @@ fun MessageBubble(message: MessageEntity, onOpenImage: (String) -> Unit) {
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
-        Surface(
-            color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = if (mine) 20.dp else 6.dp,
-                bottomEnd = if (mine) 6.dp else 20.dp,
-            ),
-            modifier = Modifier.widthIn(max = 290.dp),
-        ) {
-            Column(Modifier.padding(if (message.kind == MessageEntity.KIND_IMAGE || message.kind == MessageEntity.KIND_VIDEO) 4.dp else 0.dp)) {
-                when (message.kind) {
-                    MessageEntity.KIND_IMAGE -> ImageContent(message, onOpenImage)
-                    MessageEntity.KIND_VIDEO -> VideoContent(message)
-                    MessageEntity.KIND_AUDIO -> AudioContent(message, content)
-                    MessageEntity.KIND_FILE -> FileContent(message, content)
-                }
-                Column(Modifier.padding(start = 12.dp, end = 10.dp, top = if (message.isMedia) 4.dp else 9.dp, bottom = 7.dp)) {
-                    if (message.text.isNotBlank()) {
-                        Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
+        Box {
+            Surface(
+                color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(
+                    topStart = 20.dp,
+                    topEnd = 20.dp,
+                    bottomStart = if (mine) 20.dp else 6.dp,
+                    bottomEnd = if (mine) 6.dp else 20.dp,
+                ),
+                modifier = Modifier
+                    .widthIn(max = 290.dp)
+                    .combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                        onLongClick = openMenu,
+                    ),
+            ) {
+                Column(Modifier.padding(if (message.kind == MessageEntity.KIND_IMAGE || message.kind == MessageEntity.KIND_VIDEO) 4.dp else 0.dp)) {
+                    when (message.kind) {
+                        MessageEntity.KIND_IMAGE -> ImageContent(message, onOpenImage, openMenu)
+                        MessageEntity.KIND_VIDEO -> VideoContent(message, openMenu)
+                        MessageEntity.KIND_AUDIO -> AudioContent(message, content)
+                        MessageEntity.KIND_FILE -> FileContent(message, content, openMenu)
                     }
-                    if (message.isMedia && message.progress < 100) {
-                        TransferProgress(message, content)
+                    Column(Modifier.padding(start = 12.dp, end = 10.dp, top = if (message.isMedia) 4.dp else 9.dp, bottom = 7.dp)) {
+                        if (message.text.isNotBlank()) {
+                            Text(message.text, style = MaterialTheme.typography.bodyLarge, color = content)
+                        }
+                        if (message.isMedia && message.progress < 100) {
+                            TransferProgress(message, content)
+                        }
+                        MetaRow(message, content, Modifier.align(Alignment.End))
                     }
-                    MetaRow(message, content, Modifier.align(Alignment.End))
                 }
             }
+            BubbleMenu(
+                expanded = menuOpen,
+                message = message,
+                onDismiss = { menuOpen = false },
+                onCopy = if (message.text.isNotBlank()) ({ clipboard.setText(AnnotatedString(message.text)) }) else null,
+                onDelete = onDelete,
+            )
         }
+    }
+}
+
+@Composable
+private fun BubbleMenu(
+    expanded: Boolean,
+    message: MessageEntity,
+    onDismiss: () -> Unit,
+    onCopy: (() -> Unit)?,
+    onDelete: (MessageEntity) -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (onCopy != null) {
+            DropdownMenuItem(
+                text = { Text("Kopyala") },
+                leadingIcon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
+                onClick = {
+                    onCopy()
+                    onDismiss()
+                },
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("Benden sil", color = MaterialTheme.colorScheme.error) },
+            leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            onClick = {
+                onDismiss()
+                onDelete(message)
+            },
+        )
     }
 }
 
@@ -137,7 +217,7 @@ private fun TransferProgress(message: MessageEntity, content: Color) {
 }
 
 @Composable
-private fun ImageContent(message: MessageEntity, onOpenImage: (String) -> Unit) {
+private fun ImageContent(message: MessageEntity, onOpenImage: (String) -> Unit, onLongPress: () -> Unit) {
     val path = message.localPath
     val ready = message.fromMe || message.progress >= 100
     Box(
@@ -146,7 +226,7 @@ private fun ImageContent(message: MessageEntity, onOpenImage: (String) -> Unit) 
             .heightIn(min = 140.dp, max = 340.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black.copy(alpha = 0.25f))
-            .clickable(enabled = ready && path != null) { path?.let(onOpenImage) },
+            .combinedClickable(enabled = ready && path != null, onLongClick = onLongPress) { path?.let(onOpenImage) },
         contentAlignment = Alignment.Center,
     ) {
         if (ready && path != null) {
@@ -163,7 +243,7 @@ private fun ImageContent(message: MessageEntity, onOpenImage: (String) -> Unit) 
 }
 
 @Composable
-private fun VideoContent(message: MessageEntity) {
+private fun VideoContent(message: MessageEntity, onLongPress: () -> Unit) {
     val context = LocalContext.current
     val path = message.localPath
     val ready = message.fromMe || message.progress >= 100
@@ -173,7 +253,7 @@ private fun VideoContent(message: MessageEntity) {
             .heightIn(min = 150.dp, max = 300.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black.copy(alpha = 0.35f))
-            .clickable(enabled = ready) { MediaFiles.open(context, path, message.mime) },
+            .combinedClickable(enabled = ready, onLongClick = onLongPress) { MediaFiles.open(context, path, message.mime) },
         contentAlignment = Alignment.Center,
     ) {
         if (ready && path != null) {
@@ -269,13 +349,13 @@ private fun AudioContent(message: MessageEntity, content: Color) {
 }
 
 @Composable
-private fun FileContent(message: MessageEntity, content: Color) {
+private fun FileContent(message: MessageEntity, content: Color, onLongPress: () -> Unit) {
     val context = LocalContext.current
     val ready = message.fromMe || message.progress >= 100
     Row(
         Modifier
             .width(250.dp)
-            .clickable(enabled = ready) { MediaFiles.open(context, message.localPath, message.mime) }
+            .combinedClickable(enabled = ready, onLongClick = onLongPress) { MediaFiles.open(context, message.localPath, message.mime) }
             .padding(start = 10.dp, end = 12.dp, top = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -337,7 +417,8 @@ private fun CallLogChip(message: MessageEntity) {
 private fun StatusIcon(status: Int, content: Color) {
     val dim = content.copy(alpha = 0.7f)
     val (icon, tint, label) = when (status) {
-        MessageEntity.STATUS_DELIVERED -> Triple(Icons.Rounded.DoneAll, MaterialTheme.colorScheme.secondary, "Ulaştı")
+        MessageEntity.STATUS_READ -> Triple(Icons.Rounded.DoneAll, ReadBlue, "Okundu")
+        MessageEntity.STATUS_DELIVERED -> Triple(Icons.Rounded.DoneAll, dim, "Ulaştı")
         MessageEntity.STATUS_SENT -> Triple(Icons.Rounded.Done, dim, "Gönderildi")
         else -> Triple(Icons.Rounded.Schedule, dim, "Sırada bekliyor")
     }

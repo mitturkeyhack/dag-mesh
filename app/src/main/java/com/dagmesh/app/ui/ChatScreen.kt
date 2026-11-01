@@ -77,6 +77,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dagmesh.app.App
 import com.dagmesh.app.media.MediaFiles
@@ -99,6 +101,19 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     val peers by app.mesh.peers.collectAsStateWithLifecycle()
     val live = peers[peerId]
     val name = live?.name ?: stored?.name ?: "Bilinmeyen"
+
+    // "yazıyor…": karşı taraf yazdıkça süre uzar, bitince kendiliğinden kaybolur.
+    val typingMap by app.mesh.typing.collectAsStateWithLifecycle()
+    val typingUntil = typingMap[peerId] ?: 0L
+    var typingVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(typingUntil) {
+        val left = typingUntil - System.currentTimeMillis()
+        typingVisible = left > 0
+        if (left > 0) {
+            delay(left)
+            typingVisible = false
+        }
+    }
 
     val listState = rememberLazyListState()
     var input by rememberSaveable { mutableStateOf("") }
@@ -172,8 +187,12 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
             VoicePlayer.stop()
         }
     }
+    // Okundu bilgisi sadece ekran gerçekten açıkken gider.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch { app.mesh.markConversationRead(peerId) }
+    }
     LaunchedEffect(messages.size) {
-        dao.markRead(peerId)
+        if (App.isInForeground) app.mesh.markConversationRead(peerId)
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
     LaunchedEffect(recording) {
@@ -213,9 +232,10 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                         Column {
                             Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                peerStatus(live),
+                                if (typingVisible) "yazıyor…" else peerStatus(live),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {
+                                    typingVisible -> MaterialTheme.colorScheme.primary
                                     live == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                     live.isDirect -> MaterialTheme.colorScheme.secondary
                                     else -> MaterialTheme.colorScheme.primary
@@ -297,7 +317,10 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                         }
                         OutlinedTextField(
                             value = input,
-                            onValueChange = { input = it },
+                            onValueChange = {
+                                input = it
+                                if (it.isNotBlank()) app.mesh.notifyTyping(peerId)
+                            },
                             placeholder = { Text("Mesaj yaz") },
                             shape = RoundedCornerShape(24.dp),
                             maxLines = 5,
@@ -356,7 +379,14 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                 }
             }
             items(messages, key = { it.id }) { message ->
-                MessageBubble(message, onOpenImage = { viewerPath = it })
+                MessageBubble(
+                    message,
+                    onOpenImage = { viewerPath = it },
+                    onDelete = {
+                        if (VoicePlayer.playingId.value == it.id) VoicePlayer.stop()
+                        app.mesh.deleteLocal(it)
+                    },
+                )
             }
         }
     }

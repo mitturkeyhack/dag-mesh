@@ -86,6 +86,8 @@ data class Packet(
         const val TYPE_NACK = "nak"
         const val TYPE_CALL = "call"
         const val TYPE_AUDIO = "aud"
+        const val TYPE_READ = "read"
+        const val TYPE_TYPING = "typ"
 
         const val DEFAULT_TTL = 6
         const val ANNOUNCE_TTL = 4

@@ -29,7 +29,12 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -116,6 +121,22 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
     val updateState by Updater.state.collectAsStateWithLifecycle()
     var showShare by remember { mutableStateOf(false) }
     var showPower by remember { mutableStateOf(false) }
+    var showRename by remember { mutableStateOf(false) }
+
+    if (showRename) {
+        RenameDialog(
+            current = myName.orEmpty(),
+            onDismiss = { showRename = false },
+            onSave = { newName ->
+                showRename = false
+                if (newName.isNotBlank() && newName.trim() != myName) {
+                    app.identity.setName(newName)
+                    // Yeni ad diğer telefonlara görünsün diye ağı yeniden kur.
+                    if (running) MeshService.restart(context)
+                }
+            },
+        )
+    }
 
     if (showShare) ShareSheet(onDismiss = { showShare = false })
     if (showPower) PowerSheet(onDismiss = { showPower = false })
@@ -125,13 +146,27 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
+                    Column(
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { showRename = true }
+                            .padding(end = 8.dp),
+                    ) {
                         Text("Dağ Mesh", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            myName.orEmpty(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                myName.orEmpty(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Rounded.Edit,
+                                contentDescription = "Adını değiştir",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -467,5 +502,38 @@ private fun EmptyHint(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 20.dp, horizontal = 12.dp),
+    )
+}
+
+
+@Composable
+private fun RenameDialog(current: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var value by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        title = { Text("Adını değiştir") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it.take(24) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Yakındakiler seni bu adla görür.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(value) }, enabled = value.isNotBlank()) { Text("Kaydet") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Vazgeç") }
+        },
     )
 }
