@@ -7,6 +7,7 @@ import com.dagmesh.app.data.Identity
 import com.dagmesh.app.data.MeshDao
 import com.dagmesh.app.data.MessageEntity
 import com.dagmesh.app.data.PeerEntity
+import com.dagmesh.app.data.Settings
 import com.dagmesh.app.data.previewText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -39,6 +40,7 @@ import kotlin.coroutines.resume
 class MeshManager(
     context: Context,
     private val identity: Identity,
+    settings: Settings,
     private val dao: MeshDao,
     private val scope: CoroutineScope,
 ) : LinkListener {
@@ -71,6 +73,7 @@ class MeshManager(
 
     val media = MediaTransfer(this, dao, scope)
     val calls = CallManager(appContext, identity, dao, scope, this)
+    val power = PowerController(appContext, settings, this, scope)
 
     private val _peers = MutableStateFlow<Map<String, Peer>>(emptyMap())
     val peers: StateFlow<Map<String, Peer>> = _peers.asStateFlow()
@@ -104,6 +107,7 @@ class MeshManager(
         _running.value = true
         _error.value = null
         transports.forEach { it.start() }
+        power.start()
 
         tickerJob = scope.launch {
             var tick = 0
@@ -128,6 +132,7 @@ class MeshManager(
         _running.value = false
         tickerJob?.cancel()
         tickerJob = null
+        power.stop()
         calls.hangup()
         transports.forEach { it.stop() }
         links.clear()

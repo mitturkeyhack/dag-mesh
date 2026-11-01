@@ -35,6 +35,9 @@ class MediaTransfer(
     private val sending: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val incoming = ConcurrentHashMap<String, Incoming>()
 
+    /** Bir dosya gidiyor ya da geliyor mu? (Pil tasarrufu bu sırada taramayı kısmaz.) */
+    val isBusy: Boolean get() = sending.isNotEmpty() || incoming.isNotEmpty()
+
     private class Incoming(
         val messageId: String,
         val from: String,

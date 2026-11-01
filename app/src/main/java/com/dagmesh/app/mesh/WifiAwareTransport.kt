@@ -83,6 +83,8 @@ class WifiAwareTransport(
 
     @Volatile
     private var running = false
+    private var discoveryWanted = true
+    private var subscribing = false
     private var receiverRegistered = false
     private var session: WifiAwareSession? = null
     private var publishSession: PublishDiscoverySession? = null
@@ -130,6 +132,7 @@ class WifiAwareTransport(
             return
         }
         running = true
+        discoveryWanted = true
         ContextCompat.registerReceiver(
             context,
             stateReceiver,
@@ -206,12 +209,28 @@ class WifiAwareTransport(
                 },
                 main,
             )
+            if (discoveryWanted) startSubscribe(s)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Wi‑Fi Aware izni yok", e)
+            _state.value = TransportState.ERROR
+        }
+    }
+
+    private fun startSubscribe(s: WifiAwareSession) {
+        if (subscribeSession != null || subscribing) return
+        subscribing = true
+        try {
             s.subscribe(
                 SubscribeConfig.Builder()
                     .setServiceName(SERVICE_NAME)
                     .build(),
                 object : DiscoverySessionCallback() {
                     override fun onSubscribeStarted(session: SubscribeDiscoverySession) {
+                        subscribing = false
+                        if (!running || !discoveryWanted && links.isEmpty()) {
+                            session.close()
+                            return
+                        }
                         subscribeSession = session
                     }
 
@@ -228,14 +247,34 @@ class WifiAwareTransport(
                     }
 
                     override fun onSessionTerminated() {
+                        subscribing = false
                         subscribeSession = null
                     }
                 },
                 main,
             )
         } catch (e: SecurityException) {
+            subscribing = false
             Log.w(TAG, "Wi‑Fi Aware izni yok", e)
-            _state.value = TransportState.ERROR
+        }
+    }
+
+    /**
+     * Pil tasarrufu: taramayı (subscribe) durdurur/başlatır. Yayın açık kalır, böylece diğerleri
+     * bizi bulmaya devam eder. Kurulu bir Wi‑Fi Aware bağlantısı varken tarama kapatılmaz,
+     * çünkü bazı telefonlarda tarama oturumu kapanınca o bağlantılar da kopar.
+     */
+    override fun setDiscovery(enabled: Boolean) {
+        main.post {
+            if (!running) return@post
+            discoveryWanted = enabled
+            val s = session ?: return@post
+            if (enabled) {
+                startSubscribe(s)
+            } else if (links.isEmpty() && connecting.isEmpty()) {
+                subscribeSession?.close()
+                subscribeSession = null
+            }
         }
     }
 
@@ -248,6 +287,7 @@ class WifiAwareTransport(
         session?.close()
         publishSession = null
         subscribeSession = null
+        subscribing = false
         session = null
         discovered.clear()
         firstSeen.clear()

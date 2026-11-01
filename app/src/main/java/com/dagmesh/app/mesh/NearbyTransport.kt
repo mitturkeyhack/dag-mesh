@@ -47,6 +47,7 @@ class NearbyTransport(
     @Volatile
     private var running = false
     private var autoRetried = false
+    private var discoveryWanted = true
 
     private val connected = ConcurrentHashMap<String, String>()      // endpointId -> userId
     private val initiatedNames = ConcurrentHashMap<String, String>() // endpointId -> uç adı
@@ -58,6 +59,7 @@ class NearbyTransport(
     override fun start() {
         if (running) return
         running = true
+        discoveryWanted = true
         _state.value = TransportState.STARTING
         var failed = false
 
@@ -107,6 +109,19 @@ class NearbyTransport(
         val endpointId = linkId.removePrefix("$key:")
         client.disconnectFromEndpoint(endpointId)
         if (connected.remove(endpointId) != null) listener.onLinkDown(linkId)
+    }
+
+    override fun setDiscovery(enabled: Boolean) {
+        if (!running || enabled == discoveryWanted) return
+        discoveryWanted = enabled
+        if (enabled) {
+            client.startDiscovery(
+                SERVICE_ID, discoveryCallback,
+                DiscoveryOptions.Builder().setStrategy(STRATEGY).build(),
+            ).addOnFailureListener { Log.d(TAG, "Tarama yeniden başlatılamadı", it) }
+        } else {
+            client.stopDiscovery()
+        }
     }
 
     override fun tick() {

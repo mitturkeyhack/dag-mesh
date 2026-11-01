@@ -27,9 +27,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -110,6 +112,12 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
     }
 
     val peers = peersMap.values.sortedWith(compareBy({ it.hops }, { it.name.lowercase() }))
+    val powerMode by app.settings.powerMode.collectAsStateWithLifecycle()
+    var showShare by remember { mutableStateOf(false) }
+    var showPower by remember { mutableStateOf(false) }
+
+    if (showShare) ShareSheet(onDismiss = { showShare = false })
+    if (showPower) PowerSheet(onDismiss = { showPower = false })
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -126,6 +134,13 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showPower = true }) {
+                        Icon(
+                            powerIcon(powerMode),
+                            contentDescription = "Pil modu: ${powerMode.title}",
+                            tint = powerTint(powerMode),
+                        )
+                    }
                     IconButton(onClick = {
                         when {
                             running -> MeshService.stop(context)
@@ -146,6 +161,16 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                 ),
             )
         },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { showShare = true },
+                icon = { Icon(Icons.Rounded.Share, contentDescription = null) },
+                text = { Text("Paylaş", style = MaterialTheme.typography.labelLarge) },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = RoundedCornerShape(20.dp),
+            )
+        },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -153,7 +178,8 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                 start = 16.dp,
                 end = 16.dp,
                 top = padding.calculateTopPadding() + 4.dp,
-                bottom = padding.calculateBottomPadding() + 24.dp,
+                // Paylaş düğmesi son satırın üstüne binmesin.
+                bottom = padding.calculateBottomPadding() + 96.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {

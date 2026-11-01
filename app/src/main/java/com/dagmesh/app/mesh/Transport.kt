@@ -39,6 +39,9 @@ interface Transport {
 
     /** Ağ motoru 10 sn'de bir çağırır: kopan veya yarım kalan bağlantıları yeniden dener. */
     fun tick() {}
+
+    /** Pil tasarrufu için taramayı açar/kapatır. Yayın ve kurulu bağlantılar etkilenmez. */
+    fun setDiscovery(enabled: Boolean) {}
 }
 
 /** Kanalların ağ motoruna haber verdiği olaylar. */
