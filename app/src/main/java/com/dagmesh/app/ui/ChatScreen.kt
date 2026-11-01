@@ -88,7 +88,9 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dagmesh.app.App
 import com.dagmesh.app.media.MediaFiles
+import com.dagmesh.app.media.VideoCompressor
 import com.dagmesh.app.media.VoicePlayer
+import androidx.compose.material3.LinearProgressIndicator
 import com.dagmesh.app.media.VoiceRecorder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -125,6 +127,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
     var replyTo by remember { mutableStateOf<MessageEntity?>(null) }
+    val videoPreparing by VideoCompressor.progress.collectAsStateWithLifecycle()
     var viewerPath by remember { mutableStateOf<String?>(null) }
 
     val recorder = remember { VoiceRecorder(context) }
@@ -281,6 +284,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                       .navigationBarsPadding()
                       .imePadding(),
               ) {
+                videoPreparing?.let { PreparingStrip(it) }
                 replyTo?.let { target ->
                     ReplyStrip(
                         author = if (target.fromMe) "Sen" else name,
@@ -525,5 +529,31 @@ private fun ReplyStrip(author: String, text: String, onClose: () -> Unit) {
         IconButton(onClick = onClose) {
             Icon(Icons.Rounded.Close, contentDescription = "Yanıtı iptal et", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+
+/** Video gönderilmeden önce sıkıştırılırken görünen ince şerit. */
+@Composable
+private fun PreparingStrip(percent: Int) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            "Video hazırlanıyor · %$percent",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LinearProgressIndicator(
+            progress = { percent / 100f },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(50)),
+            color = MaterialTheme.colorScheme.secondary,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        )
     }
 }

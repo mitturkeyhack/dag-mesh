@@ -283,7 +283,7 @@ class MediaTransfer(
         private const val TAG = "DagMesh/Media"
         /** Nearby'nin 32 KB bayt sınırının altında kalacak şekilde, başlığa yer bırakarak. */
         const val CHUNK_SIZE = 30_000
-        private const val WINDOW = 8
+        private const val WINDOW = 16
         private const val NACK_DELAY_MS = 4_000L
         private const val NACK_ATTEMPTS = 6
         private const val NACK_MAX = 300

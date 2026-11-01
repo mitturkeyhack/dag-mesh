@@ -51,7 +51,6 @@ object MediaFiles {
         try {
             val resolver = context.contentResolver
             val (name, size) = queryNameAndSize(context, uri)
-            if (size > MAX_FILE_BYTES) return@withContext "Dosya çok büyük (en fazla 64 MB)"
             val mime = resolver.getType(uri)
                 ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', ""))
                 ?: "application/octet-stream"
@@ -61,6 +60,22 @@ object MediaFiles {
                 mime.startsWith("audio/") -> MessageEntity.KIND_FILE
                 else -> MessageEntity.KIND_FILE
             }
+
+            // Videoyu önce 720p'ye sıkıştır: 10 kata kadar daha küçük, o kadar hızlı gider.
+            if (kind == MessageEntity.KIND_VIDEO) {
+                val id = Packet.newId()
+                val compressed = File(dir(context), "${id.take(12)}.mp4")
+                if (VideoCompressor.compress(context, uri, compressed) && compressed.length() <= MAX_FILE_BYTES) {
+                    App.instance.mesh.sendMedia(
+                        id, peerId, MessageEntity.KIND_VIDEO, compressed,
+                        name.substringBeforeLast('.') + ".mp4", "video/mp4",
+                    )
+                    return@withContext null
+                }
+                compressed.delete()
+            }
+
+            if (size > MAX_FILE_BYTES) return@withContext "Dosya çok büyük (en fazla 64 MB)"
             if (kind == MessageEntity.KIND_IMAGE && !mime.contains("gif")) {
                 return@withContext sendImageInternal(context, peerId, uri)
             }

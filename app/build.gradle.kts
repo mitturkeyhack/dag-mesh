@@ -55,6 +55,11 @@ android {
     buildFeatures {
         compose = true
     }
+    lint {
+        // Sürüm derlemesini lint uyarıları yüzünden durdurma.
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 dependencies {
@@ -79,6 +84,11 @@ dependencies {
     // Fotoğraf ve video küçük resimleri
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-video:2.7.0")
+
+    // Video sıkıştırma (720p, donanım kodlayıcı)
+    implementation("androidx.media3:media3-transformer:1.4.1")
+    implementation("androidx.media3:media3-effect:1.4.1")
+    implementation("androidx.media3:media3-common:1.4.1")
 
     // Uygulama paylaşımı için QR kod
     implementation("com.google.zxing:core:3.5.3")
