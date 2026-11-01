@@ -31,7 +31,6 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -134,27 +133,16 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showPower = true }) {
-                        Icon(
-                            powerIcon(powerMode),
-                            contentDescription = "Pil modu: ${powerMode.title}",
-                            tint = powerTint(powerMode),
-                        )
-                    }
-                    IconButton(onClick = {
+                    PowerModeChip(powerMode) { showPower = true }
+                    Spacer(Modifier.width(8.dp))
+                    NetworkToggle(running) {
                         when {
                             running -> MeshService.stop(context)
                             permsGranted -> MeshService.start(context)
                             else -> permissionLauncher.launch(Permissions.required())
                         }
-                    }) {
-                        Icon(
-                            Icons.Rounded.PowerSettingsNew,
-                            contentDescription = if (running) "Ağı kapat" else "Ağı aç",
-                            tint = if (running) MaterialTheme.colorScheme.secondary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
+                    Spacer(Modifier.width(12.dp))
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
@@ -162,14 +150,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showShare = true },
-                icon = { Icon(Icons.Rounded.Share, contentDescription = null) },
-                text = { Text("Paylaş", style = MaterialTheme.typography.labelLarge) },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(20.dp),
-            )
+            ShareButton(onClick = { showShare = true })
         },
     ) { padding ->
         LazyColumn(
