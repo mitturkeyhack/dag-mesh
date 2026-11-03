@@ -11,6 +11,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -409,7 +411,7 @@ fun SosNavButton(
         }
     }
 
-    Box(modifier.size(76.dp), contentAlignment = Alignment.Center) {
+    Box(modifier.size(72.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val r = size.minDimension / 2
             if (active) drawCircle(SosRed.copy(alpha = pulseAlpha), radius = (r - 8.dp.toPx()) * pulse)
@@ -429,9 +431,11 @@ fun SosNavButton(
         }
         Box(
             Modifier
-                .size(58.dp)
+                .size(56.dp)
+                .shadow(8.dp, CircleShape, spotColor = SosRed)
                 .clip(CircleShape)
                 .background(Brush.verticalGradient(listOf(Color(0xFFFF6B6F), SosRed, Color(0xFFC0262C))))
+                .border(2.dp, Color.White.copy(alpha = 0.18f), CircleShape)
                 .then(gesture),
             contentAlignment = Alignment.Center,
         ) {

@@ -349,15 +349,7 @@ private fun MeshBottomBar(
             ) {
                 NavItem(Icons.Rounded.Radar, "Radar", tab == Tab.RADAR) { onTab(Tab.RADAR) }
                 NavItem(Icons.Rounded.Forum, "Sohbet", tab == Tab.CHATS, badge = unread) { onTab(Tab.CHATS) }
-                Column(Modifier.width(84.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Spacer(Modifier.height(38.dp))
-                    Text(
-                        if (sosActive) "Yayında" else "Acil",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SosRed,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
+                Spacer(Modifier.width(84.dp))
                 NavItem(Icons.Rounded.Hiking, "İz", tab == Tab.TRAIL, dot = trailActive) { onTab(Tab.TRAIL) }
                 NavItem(Icons.Rounded.Person, "Profil", tab == Tab.PROFILE) { onTab(Tab.PROFILE) }
             }
