@@ -2,9 +2,9 @@ package com.dagmesh.app.mesh
 
 import android.content.Context
 import android.os.Build
-import com.dagmesh.app.bridge.SmsBridge
 import com.dagmesh.app.call.CallManager
 import com.dagmesh.app.media.LocationHelper
+import com.dagmesh.app.sos.SosManager
 import com.dagmesh.app.data.Identity
 import com.dagmesh.app.data.MeshDao
 import com.dagmesh.app.data.MessageEntity
@@ -76,7 +76,7 @@ class MeshManager(
     val media = MediaTransfer(this, dao, scope)
     val calls = CallManager(appContext, identity, dao, scope, this)
     val power = PowerController(appContext, settings, this, scope)
-    val bridge = SmsBridge(appContext, this)
+    val sos = SosManager(appContext, scope, this)
 
     private val _peers = MutableStateFlow<Map<String, Peer>>(emptyMap())
     val peers: StateFlow<Map<String, Peer>> = _peers.asStateFlow()
@@ -125,7 +125,6 @@ class MeshManager(
                 tick++
                 transports.forEach { it.tick() }
                 expirePeers()
-                bridge.expire()
                 if (tick % ANNOUNCE_EVERY_TICKS == 0) announce()
             }
         }
@@ -248,7 +247,6 @@ class MeshManager(
         val newValue = if (message.myReaction == emoji) null else emoji
         scope.launch {
             dao.setMyReaction(message.id, newValue)
-            if (message.peerId.startsWith(MessageEntity.SMS_PREFIX)) return@launch
             val packet = newPacket(Packet.TYPE_REACT, to = message.peerId, ref = message.id, text = newValue.orEmpty())
             remember(packet.pid)
             sendPacket(packet)
@@ -291,10 +289,6 @@ class MeshManager(
 
     /** Mesajı ağa verir. Her denemede yeni paket kimliği alır, böylece yeniden gönderim zincirde engellenmez. */
     private fun transmit(message: MessageEntity) {
-        if (message.peerId.startsWith(MessageEntity.SMS_PREFIX)) {
-            scope.launch { transmitSms(message) }
-            return
-        }
         if (message.isMedia) {
             media.send(message)
             return
@@ -416,7 +410,7 @@ class MeshManager(
     suspend fun markConversationRead(peerId: String) {
         val ids = dao.unreadIncomingIds(peerId)
         dao.markRead(peerId)
-        if (ids.isEmpty() || peerId.startsWith(MessageEntity.SMS_PREFIX)) return
+        if (ids.isEmpty()) return
         ids.chunked(40).forEach { batch ->
             val packet = newPacket(Packet.TYPE_READ, to = peerId, text = batch.joinToString(","))
             remember(packet.pid)
@@ -426,7 +420,6 @@ class MeshManager(
 
     /** Yazarken çağrılır; karşı tarafa en fazla 3 sn'de bir "yazıyor" sinyali gider. */
     fun notifyTyping(peerId: String) {
-        if (peerId.startsWith(MessageEntity.SMS_PREFIX)) return
         val now = System.currentTimeMillis()
         if (now - (lastTypingSent[peerId] ?: 0L) < TYPING_SEND_INTERVAL_MS) return
         lastTypingSent[peerId] = now
@@ -450,86 +443,20 @@ class MeshManager(
         }
     }
 
-    // ---------------------------------------------------------------- şebeke köprüsü (SMS)
+    // ---------------------------------------------------------------- herkese / tek kişiye yayın (SOS)
 
-    /** Dışarıdaki bir numara için sohbet hazırlar; sohbet kimliğini döner. */
-    suspend fun prepareSmsContact(number: String): String {
-        val normalized = SmsBridge.normalize(number)
-        val peerId = MessageEntity.SMS_PREFIX + SmsBridge.key(normalized)
-        if (dao.peerNow(peerId) == null) {
-            dao.upsertPeer(PeerEntity(peerId, normalized, System.currentTimeMillis()))
-        }
-        return peerId
-    }
-
-    private suspend fun transmitSms(message: MessageEntity) {
-        val number = dao.peerNow(message.peerId)?.name ?: return
-        val payload = "$number\n${message.text}"
-        if (bridge.isActive) {
-            // Bu telefon zaten köprü: doğrudan gönder.
-            dao.updateStatus(message.id, MessageEntity.STATUS_SENT)
-            bridge.onSmsRequest(newPacket(Packet.TYPE_SMS_OUT, to = identity.userId, ref = message.id, text = payload))
-            return
-        }
-        val target = bridge.best() ?: return // köprü yok: mesaj sırada bekler
-        val packet = newPacket(Packet.TYPE_SMS_OUT, to = target.userId, ref = message.id, text = payload)
-        remember(packet.pid)
-        val targets = route(target.userId)
-        if (targets.isEmpty()) return
-        sendTo(targets, packet.toBytes()) { ok ->
-            if (ok) scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
-        }
-    }
-
-    /** Köprü bir paket göndermek istiyor (SMS sonucu ya da gelen SMS). Hedef biz isek doğrudan işle. */
-    fun sendBridgePacket(type: String, to: String, ref: String, text: String) {
-        val packet = newPacket(type, to = to, ref = ref, text = text)
-        if (to == identity.userId) {
-            scope.launch {
-                when (type) {
-                    Packet.TYPE_SMS_STATUS -> onSmsStatus(ref, text)
-                    Packet.TYPE_SMS_IN -> receiveSms(packet)
-                }
-            }
-            return
-        }
+    /** Menzildeki herkese (zincirleme) bir paket yayınlar. */
+    fun broadcast(type: String, ref: String, text: String) {
+        val packet = newPacket(type, to = null, ref = ref, text = text)
         remember(packet.pid)
         sendPacket(packet)
     }
 
-    /** Köprü açılıp kapanınca diğerleri hemen öğrensin. */
-    fun announceNow() {
-        scope.launch { announce() }
-    }
-
-    fun onBridgeAppeared() {
-        scope.launch { flushPending() }
-    }
-
-    private suspend fun onSmsStatus(ref: String?, result: String?) {
-        ref ?: return
-        if (result == "ok") dao.updateStatus(ref, MessageEntity.STATUS_DELIVERED) else dao.markFailed(ref)
-    }
-
-    private suspend fun receiveSms(packet: Packet) {
-        val (number, body) = SmsBridge.splitPayload(packet.text) ?: return
-        val peerId = MessageEntity.SMS_PREFIX + SmsBridge.key(number)
-        if (dao.peerNow(peerId) == null) {
-            dao.upsertPeer(PeerEntity(peerId, SmsBridge.normalize(number), System.currentTimeMillis()))
-        }
-        val inserted = dao.insertMessage(
-            MessageEntity(
-                id = packet.ref ?: Packet.newId(),
-                peerId = peerId,
-                fromMe = false,
-                text = body,
-                timestamp = System.currentTimeMillis(),
-                status = MessageEntity.STATUS_DELIVERED,
-                hops = packet.hops,
-                isRead = false,
-            )
-        ) != -1L
-        if (inserted) emitIncoming(peerId, "📱 " + SmsBridge.normalize(number), body)
+    /** Belirli bir kişiye (zincirleme) bir paket gönderir. */
+    fun sendTo(type: String, to: String, ref: String, text: String) {
+        val packet = newPacket(type, to = to, ref = ref, text = text)
+        remember(packet.pid)
+        sendPacket(packet)
     }
 
     fun emitIncoming(peerId: String, peerName: String, text: String) {
@@ -538,12 +465,7 @@ class MeshManager(
 
     private fun announce() {
         if (links.isEmpty()) return
-        val packet = newPacket(
-            Packet.TYPE_ANNOUNCE,
-            to = null,
-            ttl = Packet.ANNOUNCE_TTL,
-            text = if (bridge.isActive) BRIDGE_FLAG else null,
-        )
+        val packet = newPacket(Packet.TYPE_ANNOUNCE, to = null, ttl = Packet.ANNOUNCE_TTL)
         remember(packet.pid)
         sendPacket(packet)
     }
@@ -558,14 +480,15 @@ class MeshManager(
         val forMe = packet.to == identity.userId
 
         when (packet.type) {
-            Packet.TYPE_ANNOUNCE -> {
-                bridge.noteAnnounce(packet.from, packet.fromName, packet.hops + 1, packet.text == BRIDGE_FLAG)
+            Packet.TYPE_ANNOUNCE -> forward(packet, fromLinkId)
+
+            // Acil durum: herkes işler ve herkese iletir.
+            Packet.TYPE_SOS -> {
+                sos.onSos(packet)
                 forward(packet, fromLinkId)
             }
 
-            Packet.TYPE_SMS_OUT -> if (forMe) bridge.onSmsRequest(packet) else forward(packet, fromLinkId)
-            Packet.TYPE_SMS_STATUS -> if (forMe) onSmsStatus(packet.ref, packet.text) else forward(packet, fromLinkId)
-            Packet.TYPE_SMS_IN -> if (forMe) receiveSms(packet) else forward(packet, fromLinkId)
+            Packet.TYPE_SOS_ACK -> if (forMe) sos.onAck(packet) else forward(packet, fromLinkId)
 
             Packet.TYPE_MSG -> when {
                 !forMe -> forward(packet, fromLinkId)
@@ -691,7 +614,6 @@ class MeshManager(
         private const val SEEN_CAPACITY = 20_000
         private const val TYPING_SHOW_MS = 5_000L
         private const val REPLY_PREVIEW_MAX = 120
-        private const val BRIDGE_FLAG = "B"
         private const val TYPING_SEND_INTERVAL_MS = 3_000L
     }
 }

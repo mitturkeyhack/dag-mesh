@@ -24,6 +24,7 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
     val context = LocalContext.current
     val name by identity.name.collectAsStateWithLifecycle()
     val callState by app.mesh.calls.state.collectAsStateWithLifecycle()
+    val sosIncoming by app.mesh.sos.incoming.collectAsStateWithLifecycle()
 
     // Arama sonuçlarını kısa bilgi olarak göster ("Cevap yok" gibi).
     LaunchedEffect(Unit) {
@@ -60,6 +61,8 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
             }
             // Arama varsa her şeyin üstünde tam ekran arama ekranı
             if (callState != CallState.Idle) CallScreen(callState)
+            // Cevaplanmamış acil durum en üstte
+            sosIncoming.values.filter { !it.acknowledged }.minByOrNull { it.startedAt }?.let { SosAlertScreen(it) }
         }
     }
 }

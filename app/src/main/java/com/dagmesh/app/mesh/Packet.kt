@@ -99,10 +99,9 @@ data class Packet(
         const val TYPE_READ = "read"
         const val TYPE_TYPING = "typ"
         const val TYPE_REACT = "rea"
-        /** Şebeke köprüsü: dışarıya SMS isteği, gelen SMS, gönderim sonucu. */
-        const val TYPE_SMS_OUT = "smo"
-        const val TYPE_SMS_IN = "smi"
-        const val TYPE_SMS_STATUS = "sst"
+        /** Acil durum yayını ve "gördüm / geliyorum" yanıtı. */
+        const val TYPE_SOS = "sos"
+        const val TYPE_SOS_ACK = "sosa"
 
         const val DEFAULT_TTL = 6
         const val ANNOUNCE_TTL = 4

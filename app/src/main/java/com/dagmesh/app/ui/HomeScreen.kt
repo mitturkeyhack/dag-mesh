@@ -119,12 +119,11 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
     val peers = peersMap.values.sortedWith(compareBy({ it.hops }, { it.name.lowercase() }))
     val powerMode by app.settings.powerMode.collectAsStateWithLifecycle()
     val updateState by Updater.state.collectAsStateWithLifecycle()
+    val sosOutgoing by mesh.sos.outgoing.collectAsStateWithLifecycle()
+    val sosIncoming by mesh.sos.incoming.collectAsStateWithLifecycle()
     var showShare by remember { mutableStateOf(false) }
     var showPower by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
-    var showBridge by remember { mutableStateOf(false) }
-
-    if (showBridge) BridgeSheet(onDismiss = { showBridge = false }, onOpenChat = onOpenChat)
 
     if (showRename) {
         RenameDialog(
@@ -204,7 +203,16 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item(key = "radar") { RadarCard(peers, running, onBridgeClick = { showBridge = true }) }
+            item(key = "radar") { RadarCard(peers, running) }
+
+            // Acil durum: yayındaysa kırmızı kart, değilse basılı tutulan SOS düğmesi.
+            item(key = "sos") {
+                val out = sosOutgoing
+                if (out != null) SosActiveCard(out) else SosHoldButton()
+            }
+            items(sosIncoming.values.filter { it.acknowledged }.sortedByDescending { it.lastSeen }, key = { "sos-" + it.id }) {
+                SosIncomingCard(it)
+            }
 
             if (updateState is Updater.State.Downloading || updateState is Updater.State.Installing ||
                 updateState is Updater.State.NeedsConfirm
@@ -254,7 +262,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
 }
 
 @Composable
-private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean, onBridgeClick: () -> Unit) {
+private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean) {
     val direct = peers.count { it.isDirect }
     val relayed = peers.size - direct
     Surface(
@@ -300,8 +308,7 @@ private fun RadarCard(peers: List<MeshManager.Peer>, running: Boolean, onBridgeC
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     App.instance.mesh.transports.forEach { ChannelRow(it) }
                 }
-                Spacer(Modifier.height(6.dp))
-                BridgeChip(onClick = onBridgeClick)
+
             }
         }
     }

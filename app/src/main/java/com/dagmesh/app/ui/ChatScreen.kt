@@ -110,16 +110,8 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     val stored by remember(peerId) { dao.peer(peerId) }
         .collectAsStateWithLifecycle(initialValue = null)
     val peers by app.mesh.peers.collectAsStateWithLifecycle()
-    val isSms = peerId.startsWith(MessageEntity.SMS_PREFIX)
-    val live = if (isSms) null else peers[peerId]
+    val live = peers[peerId]
     val name = live?.name ?: stored?.name ?: "Bilinmeyen"
-    val bridgeOn by app.mesh.bridge.enabled.collectAsStateWithLifecycle()
-    val bridges by app.mesh.bridge.bridges.collectAsStateWithLifecycle()
-    val smsStatus = when {
-        bridgeOn -> "SMS · bu telefon köprü"
-        bridges.isNotEmpty() -> "SMS · köprü: " + bridges.values.minBy { it.hops }.name
-        else -> "Köprü yok · mesaj sırada bekler"
-    }
     var locating by remember { mutableStateOf(false) }
 
     // "yazıyor…": karşı taraf yazdıkça süre uzar, bitince kendiliğinden kaybolur.
@@ -264,11 +256,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                         Column {
                             Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                when {
-                                    isSms -> smsStatus
-                                    typingVisible -> "yazıyor…"
-                                    else -> peerStatus(live)
-                                },
+                                if (typingVisible) "yazıyor…" else peerStatus(live),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {
                                     typingVisible -> MaterialTheme.colorScheme.primary
@@ -283,7 +271,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    if (!isSms) IconButton(
+                    IconButton(
                         onClick = {
                             if (live?.isDirect == true) withMic("call") { startCall() }
                             else toast("Arama için kişinin doğrudan bağlı olması gerekir")
@@ -339,7 +327,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                             },
                         )
                     } else {
-                        if (!isSms) Box {
+                        Box {
                             IconButton(onClick = { menuOpen = true }) {
                                 Icon(
                                     Icons.Rounded.AddCircle,
@@ -393,7 +381,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                             ),
                             modifier = Modifier.weight(1f),
                         )
-                        val textMode = input.isNotBlank() || isSms
+                        val textMode = input.isNotBlank()
                         FilledIconButton(
                             onClick = { if (textMode) sendText() else withMic("record") { startRecording() } },
                             modifier = Modifier.size(52.dp),
