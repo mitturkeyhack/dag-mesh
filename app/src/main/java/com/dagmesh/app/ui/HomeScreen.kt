@@ -1,6 +1,39 @@
 package com.dagmesh.app.ui
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.CellTower
+import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Hiking
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Radar
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import com.dagmesh.app.data.PowerMode
+import com.dagmesh.app.sos.SosManager
+import com.dagmesh.app.trail.TrailRecorder
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -73,6 +106,8 @@ import com.dagmesh.app.mesh.Transport
 import com.dagmesh.app.mesh.TransportState
 import com.dagmesh.app.ui.theme.SectionStyle
 
+private enum class Tab(val title: String) { RADAR("Yakındakiler"), CHATS("Sohbetler"), TRAIL("Eve dönüş izi"), PROFILE("Profil") }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(onOpenChat: (String) -> Unit) {
@@ -121,9 +156,33 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
     val updateState by Updater.state.collectAsStateWithLifecycle()
     val sosOutgoing by mesh.sos.outgoing.collectAsStateWithLifecycle()
     val sosIncoming by mesh.sos.incoming.collectAsStateWithLifecycle()
+    val trailRecording by TrailRecorder.recording.collectAsStateWithLifecycle()
+    val trailReturning by TrailRecorder.returning.collectAsStateWithLifecycle()
     var showShare by remember { mutableStateOf(false) }
     var showPower by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
+    var showSosSheet by remember { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableStateOf(Tab.RADAR) }
+    var holdProgress by remember { mutableFloatStateOf(0f) }
+    var hintTick by remember { mutableIntStateOf(0) }
+    var showHint by remember { mutableStateOf(false) }
+    val unread = conversations.sumOf { it.unread }
+
+    // Kısa dokunuşta "basılı tut" ipucunu 2,5 sn göster.
+    LaunchedEffect(hintTick) {
+        if (hintTick > 0) { showHint = true; delay(2500); showHint = false }
+    }
+    LaunchedEffect(sosOutgoing == null) { if (sosOutgoing == null) showSosSheet = false }
+
+    BackHandler(enabled = tab != Tab.RADAR) { tab = Tab.RADAR }
+
+    val toggleNetwork = {
+        when {
+            running -> MeshService.stop(context)
+            permsGranted -> MeshService.start(context)
+            else -> permissionLauncher.launch(Permissions.required())
+        }
+    }
 
     if (showRename) {
         RenameDialog(
@@ -142,123 +201,496 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
 
     if (showShare) ShareSheet(onDismiss = { showShare = false })
     if (showPower) PowerSheet(onDismiss = { showPower = false })
+    val out = sosOutgoing
+    if (showSosSheet && out != null) {
+        ModalBottomSheet(
+            onDismissRequest = { showSosSheet = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) { SosActiveCard(out) }
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
-                    Column(
-                        Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { showRename = true }
-                            .padding(end = 8.dp),
-                    ) {
-                        Text("Dağ Mesh", style = MaterialTheme.typography.titleLarge)
+                    if (tab == Tab.RADAR) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                myName.orEmpty(),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Icon(
-                                Icons.Rounded.Edit,
-                                contentDescription = "Adını değiştir",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(12.dp),
-                            )
+                            MountainLogo(Modifier.size(30.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text("Dağ Mesh", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         }
+                    } else {
+                        Text(tab.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     }
                 },
                 actions = {
-                    PowerModeChip(powerMode) { showPower = true }
-                    Spacer(Modifier.width(8.dp))
-                    NetworkToggle(running) {
-                        when {
-                            running -> MeshService.stop(context)
-                            permsGranted -> MeshService.start(context)
-                            else -> permissionLauncher.launch(Permissions.required())
-                        }
+                    if (tab == Tab.RADAR || tab == Tab.CHATS) {
+                        PowerModeChip(powerMode) { showPower = true }
+                        Spacer(Modifier.width(8.dp))
+                        NetworkToggle(running) { toggleNetwork() }
+                        Spacer(Modifier.width(12.dp))
                     }
-                    Spacer(Modifier.width(12.dp))
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
             )
         },
-        floatingActionButton = {
-            ShareButton(onClick = { showShare = true })
+        bottomBar = {
+            MeshBottomBar(
+                tab = tab,
+                onTab = { tab = it },
+                unread = unread,
+                trailActive = trailRecording || trailReturning,
+                sosActive = sosOutgoing != null,
+                onSosProgress = { holdProgress = it },
+                onSosShortTap = { hintTick++ },
+                onSosActiveClick = { showSosSheet = true },
+            )
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = padding.calculateTopPadding() + 4.dp,
-                // Paylaş düğmesi son satırın üstüne binmesin.
-                bottom = padding.calculateBottomPadding() + 96.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item(key = "radar") { RadarCard(peers, running) }
-
-            // Acil durum: yayındaysa kırmızı kart, değilse basılı tutulan SOS düğmesi.
-            item(key = "sos") {
-                val out = sosOutgoing
-                if (out != null) SosActiveCard(out) else SosHoldButton()
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+                if (out != null) {
+                    Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { SosBanner(out) { showSosSheet = true } }
+                }
+                val inner = PaddingValues(bottom = padding.calculateBottomPadding() + 16.dp)
+                Box(Modifier.weight(1f)) {
+                    when (tab) {
+                        Tab.RADAR -> RadarTab(
+                            contentPadding = inner,
+                            peers = peers,
+                            running = running,
+                            permsGranted = permsGranted,
+                            error = error,
+                            showUpdate = updateState is Updater.State.Downloading || updateState is Updater.State.Installing ||
+                                updateState is Updater.State.NeedsConfirm,
+                            acknowledgedSos = sosIncoming.values.filter { it.acknowledged }.sortedByDescending { it.lastSeen },
+                            onGrant = { permissionLauncher.launch(Permissions.required()) },
+                            onOpenChat = onOpenChat,
+                        )
+                        Tab.CHATS -> ChatsTab(
+                            contentPadding = inner,
+                            conversations = conversations,
+                            peers = peers,
+                            peersMap = peersMap,
+                            onOpenChat = onOpenChat,
+                            onGoRadar = { tab = Tab.RADAR },
+                        )
+                        Tab.TRAIL -> TrailTab(inner)
+                        Tab.PROFILE -> ProfileTab(
+                            contentPadding = inner,
+                            name = myName.orEmpty(),
+                            id = app.identity.userId,
+                            powerMode = powerMode,
+                            running = running,
+                            onRename = { showRename = true },
+                            onPower = { showPower = true },
+                            onShare = { showShare = true },
+                            onToggleNetwork = { toggleNetwork() },
+                        )
+                    }
+                }
             }
-            items(sosIncoming.values.filter { it.acknowledged }.sortedByDescending { it.lastSeen }, key = { "sos-" + it.id }) {
-                SosIncomingCard(it)
-            }
 
-            if (updateState is Updater.State.Downloading || updateState is Updater.State.Installing ||
-                updateState is Updater.State.NeedsConfirm
+            // SOS ipucu: basılı tutarken geri sayım, kısa dokunuşta açıklama.
+            AnimatedVisibility(
+                visible = holdProgress > 0f || showHint,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = padding.calculateBottomPadding() + 12.dp),
             ) {
-                item(key = "update") { UpdateBanner() }
-            }
-
-            if (!permsGranted) {
-                item(key = "perm") {
-                    PermissionCard(
-                        onGrant = { permissionLauncher.launch(Permissions.required()) },
-                        onSettings = { openAppSettings(context) },
+                val secs = ((1f - holdProgress) * 2f + 0.4f).roundToInt()
+                Surface(color = SosRed, shape = RoundedCornerShape(50), shadowElevation = 6.dp) {
+                    Text(
+                        if (holdProgress > 0f) "Bırakma… $secs sn · konumun herkese alarmla gider"
+                        else "Acil durum için SOS'u 2 saniye basılı tut",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     )
-                }
-            }
-            error?.let { message ->
-                item(key = "error") {
-                    ErrorCard(
-                        message = message,
-                        onRetry = { MeshService.restart(context) },
-                        onSettings = { openAppSettings(context) },
-                    )
-                }
-            }
-
-            item(key = "h-near") { SectionHeader("YAKINDAKİLER", peers.size) }
-            if (peers.isEmpty()) {
-                item(key = "empty") {
-                    EmptyHint(
-                        if (running) "Etrafta Dağ Mesh açık bir telefon aranıyor…\nBluetooth, Wi‑Fi ve Konum açık olmalı."
-                        else "Ağ kapalı. Açmak için sağ üstteki düğmeye dokun."
-                    )
-                }
-            }
-            items(peers, key = { "p-" + it.id }) { peer ->
-                PeerRow(peer) { onOpenChat(peer.id) }
-            }
-
-            if (conversations.isNotEmpty()) {
-                item(key = "h-chats") { SectionHeader("SOHBETLER", null) }
-                items(conversations, key = { "c-" + it.peerId }) { row ->
-                    ConversationItem(row, online = peersMap[row.peerId] != null) { onOpenChat(row.peerId) }
                 }
             }
         }
     }
+}
+
+/** Alt menü: 4 sekme + ortada yükseltilmiş SOS. */
+@Composable
+private fun MeshBottomBar(
+    tab: Tab,
+    onTab: (Tab) -> Unit,
+    unread: Int,
+    trailActive: Boolean,
+    sosActive: Boolean,
+    onSosProgress: (Float) -> Unit,
+    onSosShortTap: () -> Unit,
+    onSosActiveClick: () -> Unit,
+) {
+    Box(Modifier.fillMaxWidth()) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 20.dp),
+        ) {
+            Row(
+                Modifier
+                    .navigationBarsPadding()
+                    .height(70.dp)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NavItem(Icons.Rounded.Radar, "Radar", tab == Tab.RADAR) { onTab(Tab.RADAR) }
+                NavItem(Icons.Rounded.Forum, "Sohbet", tab == Tab.CHATS, badge = unread) { onTab(Tab.CHATS) }
+                Column(Modifier.width(84.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(Modifier.height(38.dp))
+                    Text(
+                        if (sosActive) "Yayında" else "Acil",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SosRed,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                NavItem(Icons.Rounded.Hiking, "İz", tab == Tab.TRAIL, dot = trailActive) { onTab(Tab.TRAIL) }
+                NavItem(Icons.Rounded.Person, "Profil", tab == Tab.PROFILE) { onTab(Tab.PROFILE) }
+            }
+        }
+        SosNavButton(
+            active = sosActive,
+            onProgress = onSosProgress,
+            onShortTap = onSosShortTap,
+            onActiveClick = onSosActiveClick,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+    }
+}
+
+@Composable
+private fun RowScope.NavItem(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    badge: Int = 0,
+    dot: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val pill by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, label = "pill",
+    )
+    val tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box {
+            Box(
+                Modifier
+                    .size(width = 56.dp, height = 30.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(pill),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+            }
+            if (badge > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-4).dp, y = (-4).dp)
+                        .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary)
+                        .padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (badge > 99) "99+" else "$badge",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            } else if (dot) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-8).dp, y = 2.dp)
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(SosRed)
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun RadarTab(
+    contentPadding: PaddingValues,
+    peers: List<MeshManager.Peer>,
+    running: Boolean,
+    permsGranted: Boolean,
+    error: String?,
+    showUpdate: Boolean,
+    acknowledgedSos: List<SosManager.Incoming>,
+    onGrant: () -> Unit,
+    onOpenChat: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = contentPadding.calculateBottomPadding()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(acknowledgedSos, key = { "sos-" + it.id }) { SosIncomingCard(it) }
+
+        item(key = "radar") { RadarCard(peers, running) }
+
+        if (showUpdate) item(key = "update") { UpdateBanner() }
+
+        if (!permsGranted) {
+            item(key = "perm") {
+                PermissionCard(onGrant = onGrant, onSettings = { openAppSettings(context) })
+            }
+        }
+        error?.let { message ->
+            item(key = "error") {
+                ErrorCard(
+                    message = message,
+                    onRetry = { MeshService.restart(context) },
+                    onSettings = { openAppSettings(context) },
+                )
+            }
+        }
+
+        item(key = "h-near") { SectionHeader("YAKINDAKİLER", peers.size) }
+        if (peers.isEmpty()) {
+            item(key = "empty") {
+                EmptyHint(
+                    if (running) "Etrafta Dağ Mesh açık bir telefon aranıyor…\nBluetooth, Wi‑Fi ve Konum açık olmalı."
+                    else "Ağ kapalı. Açmak için sağ üstteki düğmeye dokun."
+                )
+            }
+        }
+        items(peers, key = { "p-" + it.id }) { peer ->
+            PeerRow(peer) { onOpenChat(peer.id) }
+        }
+    }
+}
+
+@Composable
+private fun ChatsTab(
+    contentPadding: PaddingValues,
+    conversations: List<ConversationRow>,
+    peers: List<MeshManager.Peer>,
+    peersMap: Map<String, MeshManager.Peer>,
+    onOpenChat: (String) -> Unit,
+    onGoRadar: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = contentPadding.calculateBottomPadding()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (peers.isNotEmpty()) {
+            item(key = "online") {
+                Column {
+                    SectionHeader("ŞU AN ULAŞILABİLİR", peers.size)
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items(peers, key = { "o-" + it.id }) { peer ->
+                            Column(
+                                Modifier
+                                    .width(64.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { onOpenChat(peer.id) }
+                                    .padding(vertical = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Avatar(peer.id, peer.name, size = 52.dp, online = peer.isDirect)
+                                Spacer(Modifier.height(4.dp))
+                                Text(peer.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (conversations.isEmpty()) {
+            item(key = "empty") {
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 48.dp, start = 24.dp, end = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        Modifier.size(80.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.Forum, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                    }
+                    Text("Henüz sohbet yok", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Yakınındaki birine dokunarak yazmaya başla. Mesajlar internetsiz, telefondan telefona gider.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    FilledTonalButton(onClick = onGoRadar, shape = RoundedCornerShape(14.dp)) { Text("Yakındakileri gör") }
+                }
+            }
+        } else {
+            item(key = "h-chats") { SectionHeader("SOHBETLER", null) }
+            items(conversations, key = { "c-" + it.peerId }) { row ->
+                ConversationItem(row, online = peersMap[row.peerId] != null) { onOpenChat(row.peerId) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileTab(
+    contentPadding: PaddingValues,
+    name: String,
+    id: String,
+    powerMode: PowerMode,
+    running: Boolean,
+    onRename: () -> Unit,
+    onPower: () -> Unit,
+    onShare: () -> Unit,
+    onToggleNetwork: () -> Unit,
+) {
+    val context = LocalContext.current
+    val version = remember { Updater.currentVersionName(context) }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding)
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Spacer(Modifier.height(4.dp))
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(
+                Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Avatar(id, name, size = 84.dp, online = running)
+                Spacer(Modifier.height(4.dp))
+                Text(name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (running) "Yakındakiler seni bu adla görüyor" else "Ağ kapalı · şu an görünmüyorsun",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                FilledTonalButton(onClick = onRename, shape = RoundedCornerShape(14.dp)) {
+                    Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Adı düzenle")
+                }
+            }
+        }
+
+        SectionHeader("AYARLAR", null)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+            Column {
+                SettingRow(
+                    icon = powerIcon(powerMode),
+                    iconTint = powerTint(powerMode),
+                    title = "Pil modu",
+                    subtitle = powerMode.title,
+                    onClick = onPower,
+                )
+                RowDivider()
+                SettingRow(
+                    icon = Icons.Rounded.CellTower,
+                    iconTint = if (running) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
+                    title = "Ağ",
+                    subtitle = if (running) "Açık · mesaj alıp iletiyorsun" else "Kapalı",
+                    onClick = onToggleNetwork,
+                    trailing = { Switch(checked = running, onCheckedChange = { onToggleNetwork() }) },
+                )
+                RowDivider()
+                SettingRow(
+                    icon = Icons.Rounded.Share,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = "Uygulamayı paylaş",
+                    subtitle = "İnternetsiz: QR ya da Quick Share",
+                    onClick = onShare,
+                )
+            }
+        }
+
+        SectionHeader("UYGULAMA", null)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+            Box(Modifier.padding(8.dp)) { UpdateRow(version) }
+        }
+        Text(
+            "Dağ Mesh · internetsiz, telefondan telefona haberleşme",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun SettingRow(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(iconTint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp)) }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (trailing != null) trailing()
+        else Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun RowDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 70.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+    )
 }
 
 @Composable

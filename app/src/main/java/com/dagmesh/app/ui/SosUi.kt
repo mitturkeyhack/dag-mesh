@@ -355,3 +355,122 @@ fun SosAlertScreen(item: SosManager.Incoming) {
 }
 
 private const val HOLD_MS = 2_000L
+
+/**
+ * Alt menünün ortasındaki SOS düğmesi.
+ * Kapalıyken 2 sn basılı tutulunca yayını başlatır; açıkken nabız gibi atar, dokununca ayrıntı açılır.
+ */
+@Composable
+fun SosNavButton(
+    active: Boolean,
+    onProgress: (Float) -> Unit,
+    onShortTap: () -> Unit,
+    onActiveClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sos = App.instance.mesh.sos
+    val haptics = LocalHapticFeedback.current
+    var progress by remember { mutableFloatStateOf(0f) }
+    val transition = rememberInfiniteTransition(label = "sosnav")
+    val pulse by transition.animateFloat(1f, 1.35f, infiniteRepeatable(tween(900), RepeatMode.Restart), label = "pulse")
+    val pulseAlpha by transition.animateFloat(0.45f, 0f, infiniteRepeatable(tween(900), RepeatMode.Restart), label = "pa")
+    val ringBg = MaterialTheme.colorScheme.background
+
+    val gesture = if (active) {
+        Modifier.clickable(onClick = onActiveClick)
+    } else {
+        Modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown()
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                val start = System.currentTimeMillis()
+                var fired = false
+                while (true) {
+                    val ended = withTimeoutOrNull(16) {
+                        waitForUpOrCancellation()
+                        true
+                    }
+                    val elapsed = System.currentTimeMillis() - start
+                    progress = (elapsed / HOLD_MS.toFloat()).coerceAtMost(1f)
+                    onProgress(progress)
+                    if (!fired && elapsed >= HOLD_MS) {
+                        fired = true
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        sos.start()
+                    }
+                    if (ended == true) {
+                        if (!fired && elapsed < 600) onShortTap()
+                        break
+                    }
+                }
+                progress = 0f
+                onProgress(0f)
+            }
+        }
+    }
+
+    Box(modifier.size(76.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val r = size.minDimension / 2
+            if (active) drawCircle(SosRed.copy(alpha = pulseAlpha), radius = (r - 8.dp.toPx()) * pulse)
+            // Menü çubuğundan ayıran halka
+            drawCircle(ringBg, radius = r - 2.dp.toPx())
+            if (progress > 0f) {
+                drawArc(
+                    color = SosRed,
+                    startAngle = -90f,
+                    sweepAngle = 360f * progress,
+                    useCenter = false,
+                    style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
+                    topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(size.width - 8.dp.toPx(), size.height - 8.dp.toPx()),
+                )
+            }
+        }
+        Box(
+            Modifier
+                .size(58.dp)
+                .clip(CircleShape)
+                .background(Brush.verticalGradient(listOf(Color(0xFFFF6B6F), SosRed, Color(0xFFC0262C))))
+                .then(gesture),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "SOS",
+                color = Color.White,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 16.sp,
+                letterSpacing = 1.sp,
+            )
+        }
+    }
+}
+
+/** SOS yayındayken her sekmenin üstünde duran ince kırmızı şerit. */
+@Composable
+fun SosBanner(out: SosManager.Outgoing, onClick: () -> Unit) {
+    val transition = rememberInfiniteTransition(label = "banner")
+    val pulse by transition.animateFloat(0.4f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "b")
+    Surface(color = SosRed, shape = RoundedCornerShape(18.dp), onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(Color.White.copy(alpha = pulse)))
+            Column(Modifier.weight(1f)) {
+                Text("SOS yayında", color = Color.White, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    when {
+                        out.helpers.isNotEmpty() -> "${out.helpers.size} kişi yardıma geliyor"
+                        out.seenBy.isNotEmpty() -> "${out.seenBy.size} kişi gördü"
+                        else -> "Yakındakilere ulaştırılıyor…"
+                    },
+                    color = Color.White.copy(alpha = 0.9f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            TextButton(onClick = onClick) { Text("Ayrıntı", color = Color.White) }
+        }
+    }
+}

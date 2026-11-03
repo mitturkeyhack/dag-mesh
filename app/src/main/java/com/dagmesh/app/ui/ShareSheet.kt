@@ -404,7 +404,7 @@ private fun InfoRow(label: String, value: String) {
 
 /** Sürüm bilgisi + elle güncelleme kontrolü. */
 @Composable
-private fun UpdateRow(version: String) {
+internal fun UpdateRow(version: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by Updater.state.collectAsStateWithLifecycle()

@@ -39,6 +39,7 @@ class App : Application(), ImageLoaderFactory {
         settings = Settings(this)
         mesh = MeshManager(this, identity, settings, db.dao(), scope)
         Updater.schedule(this)
+        com.dagmesh.app.trail.TrailRecorder.init(this)
     }
 
     /** Fotoğraf ve video küçük resimleri için görsel yükleyici. */
