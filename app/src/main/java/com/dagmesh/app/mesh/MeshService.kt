@@ -31,6 +31,7 @@ class MeshService : Service() {
     override fun onCreate() {
         super.onCreate()
         Notifications.createChannels(this)
+        com.dagmesh.app.sos.FallDetector.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,6 +125,7 @@ class MeshService : Service() {
 
     override fun onDestroy() {
         mesh.stop()
+        com.dagmesh.app.sos.FallDetector.stop()
         scope.cancel()
         Notifications.cancelIncomingCall(this)
         super.onDestroy()

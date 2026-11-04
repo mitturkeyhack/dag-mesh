@@ -41,6 +41,7 @@ class App : Application(), ImageLoaderFactory {
         Updater.schedule(this)
         com.dagmesh.app.trail.TrailRecorder.init(this)
         com.dagmesh.app.map.OfflineMap.init(this)
+        com.dagmesh.app.sos.FallDetector.init(this)
         com.dagmesh.app.map.PinStore.init(this, mesh, scope)
     }
 

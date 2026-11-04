@@ -19,6 +19,7 @@ import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Hiking
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PersonalInjury
 import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -622,6 +623,16 @@ private fun ProfileTab(
                     subtitle = if (running) "Açık · mesaj alıp iletiyorsun" else "Kapalı",
                     onClick = onToggleNetwork,
                     trailing = { Switch(checked = running, onCheckedChange = { onToggleNetwork() }) },
+                )
+                RowDivider()
+                val fallOn by com.dagmesh.app.sos.FallDetector.enabled.collectAsStateWithLifecycle()
+                SettingRow(
+                    icon = Icons.Rounded.PersonalInjury,
+                    iconTint = SosRed,
+                    title = "Düşme algılama",
+                    subtitle = if (fallOn) "Açık · düşersen 30 sn sonra SOS" else "Kapalı",
+                    onClick = { com.dagmesh.app.sos.FallDetector.setEnabled(!fallOn) },
+                    trailing = { Switch(checked = fallOn, onCheckedChange = { com.dagmesh.app.sos.FallDetector.setEnabled(it) }) },
                 )
                 RowDivider()
                 SettingRow(

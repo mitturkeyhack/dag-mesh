@@ -27,8 +27,10 @@ class MainActivity : ComponentActivity() {
         // Kilit ekranının üstünde sadece cevaplanmamış bir acil durum varken açıl; mesajlar kilitte görünmesin.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.CREATED) {
-                App.instance.mesh.sos.incoming.collect { map ->
-                    val alarm = map.values.any { !it.acknowledged }
+                kotlinx.coroutines.flow.combine(
+                    App.instance.mesh.sos.incoming,
+                    com.dagmesh.app.sos.FallDetector.alertUntil,
+                ) { map, fall -> map.values.any { !it.acknowledged } || fall != null }.collect { alarm ->
                     if (Build.VERSION.SDK_INT >= 27) {
                         setShowWhenLocked(alarm)
                         setTurnScreenOn(alarm)

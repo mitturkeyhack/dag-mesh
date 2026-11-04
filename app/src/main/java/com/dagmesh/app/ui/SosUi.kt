@@ -478,3 +478,70 @@ fun SosBanner(out: SosManager.Outgoing, onClick: () -> Unit) {
         }
     }
 }
+
+/** Düşme algılanınca tam ekran geri sayım: "İyiyim" denmezse SOS gider. */
+@Composable
+fun FallAlertScreen(until: Long) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(until) {
+        while (isActive) { now = System.currentTimeMillis(); delay(200) }
+    }
+    BackHandler { }
+    val left = ((until - now) / 1000f).coerceAtLeast(0f)
+    val frac = (left / com.dagmesh.app.sos.FallDetector.COUNTDOWN_SEC).coerceIn(0f, 1f)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF3A0D10), Color(0xFF15080A))))
+            .clickable(enabled = false) { }
+            .systemBarsPadding()
+            .padding(24.dp),
+    ) {
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(Modifier.height(32.dp))
+                Text("Düşme algılandı", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "İyi misin? Cevap vermezsen konumunla birlikte SOS yakındaki herkese gönderilecek.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawCircle(Color.White.copy(alpha = 0.08f))
+                    drawArc(
+                        color = SosRed,
+                        startAngle = -90f,
+                        sweepAngle = 360f * frac,
+                        useCenter = false,
+                        style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("${kotlin.math.ceil(left).toInt()}", color = Color.White, fontSize = 72.sp, fontWeight = FontWeight.Bold)
+                    Text("saniye", color = Color.White.copy(alpha = 0.7f))
+                }
+            }
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = { com.dagmesh.app.sos.FallDetector.cancel() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF15080A)),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                ) { Text("İyiyim, iptal et", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                OutlinedButton(
+                    onClick = { com.dagmesh.app.sos.FallDetector.sendNow() },
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                ) { Text("Yardım lazım, hemen gönder", color = SosRed, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+    }
+}
