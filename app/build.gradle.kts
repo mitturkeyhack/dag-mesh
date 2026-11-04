@@ -92,6 +92,8 @@ dependencies {
 
     // Uygulama paylaşımı için QR kod
     implementation("com.google.zxing:core:3.5.3")
+    // Çevrimdışı harita (OpenStreetMap / OpenTopoMap)
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

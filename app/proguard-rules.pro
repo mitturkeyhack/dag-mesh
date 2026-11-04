@@ -5,3 +5,6 @@
 # Nearby / Play Services
 -keep class com.google.android.gms.nearby.** { *; }
 -dontwarn com.google.android.gms.**
+# osmdroid (çevrimdışı harita)
+-keep class org.osmdroid.** { *; }
+-dontwarn org.osmdroid.**

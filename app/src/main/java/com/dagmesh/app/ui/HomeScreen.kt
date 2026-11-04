@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.CellTower
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Hiking
+import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.material3.FilledTonalButton
@@ -106,7 +107,7 @@ import com.dagmesh.app.mesh.Transport
 import com.dagmesh.app.mesh.TransportState
 import com.dagmesh.app.ui.theme.SectionStyle
 
-private enum class Tab(val title: String) { RADAR("Yakındakiler"), CHATS("Sohbetler"), TRAIL("Eve dönüş izi"), PROFILE("Profil") }
+private enum class Tab(val title: String) { RADAR("Yakındakiler"), CHATS("Sohbetler"), TRAIL("Harita"), PROFILE("Profil") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -280,7 +281,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                             onOpenChat = onOpenChat,
                             onGoRadar = { tab = Tab.RADAR },
                         )
-                        Tab.TRAIL -> TrailTab(inner)
+                        Tab.TRAIL -> MapTab(inner)
                         Tab.PROFILE -> ProfileTab(
                             contentPadding = inner,
                             name = myName.orEmpty(),
@@ -350,7 +351,7 @@ private fun MeshBottomBar(
                 NavItem(Icons.Rounded.Radar, "Radar", tab == Tab.RADAR) { onTab(Tab.RADAR) }
                 NavItem(Icons.Rounded.Forum, "Sohbet", tab == Tab.CHATS, badge = unread) { onTab(Tab.CHATS) }
                 Spacer(Modifier.width(84.dp))
-                NavItem(Icons.Rounded.Hiking, "İz", tab == Tab.TRAIL, dot = trailActive) { onTab(Tab.TRAIL) }
+                NavItem(Icons.Rounded.Map, "Harita", tab == Tab.TRAIL, dot = trailActive) { onTab(Tab.TRAIL) }
                 NavItem(Icons.Rounded.Person, "Profil", tab == Tab.PROFILE) { onTab(Tab.PROFILE) }
             }
         }

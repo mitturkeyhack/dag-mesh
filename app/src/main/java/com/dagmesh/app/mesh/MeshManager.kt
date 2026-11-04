@@ -488,6 +488,12 @@ class MeshManager(
                 forward(packet, fromLinkId)
             }
 
+            // Harita işaretleri: herkes kaydeder, herkese iletilir.
+            Packet.TYPE_PIN -> {
+                com.dagmesh.app.map.PinStore.onPacket(packet)
+                if (!forMe) forward(packet, fromLinkId)
+            }
+
             Packet.TYPE_SOS_ACK -> if (forMe) sos.onAck(packet) else forward(packet, fromLinkId)
 
             Packet.TYPE_MSG -> when {

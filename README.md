@@ -22,7 +22,8 @@ Her sürüm aynı imzayla çıktığı için yeni APK eskisinin üstüne kurulur
 4. ✅ Konum gönderme (GPS, uzaklık + yön) · ✅ SOS acil durum (alarm, konum, "yardıma geliyorum")
 5. ✅ Pil modları (Performans / Dengeli / Tasarruf), uygulamayı internetsiz paylaşma (QR + Wi‑Fi noktası, Quick Share)
 6. ✅ Eve dönüş izi (GPS iz kaydı + pusulalı geri dönüş), alt menü (Radar · Sohbet · SOS · İz · Profil)
-7. Yerel sosyal akış
+7. ✅ Çevrimdışı topoğrafik harita (bölge indirme) + ortak işaretler (su, barınak, tehlike, yol kapalı, şebeke, sürü, buluşma, kamp)
+8. Yerel sosyal akış
 
 ## Proje yapısı
 

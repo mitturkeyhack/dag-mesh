@@ -40,6 +40,8 @@ class App : Application(), ImageLoaderFactory {
         mesh = MeshManager(this, identity, settings, db.dao(), scope)
         Updater.schedule(this)
         com.dagmesh.app.trail.TrailRecorder.init(this)
+        com.dagmesh.app.map.OfflineMap.init(this)
+        com.dagmesh.app.map.PinStore.init(this, mesh, scope)
     }
 
     /** Fotoğraf ve video küçük resimleri için görsel yükleyici. */

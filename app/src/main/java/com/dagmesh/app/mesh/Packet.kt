@@ -102,6 +102,8 @@ data class Packet(
         /** Acil durum yayını ve "gördüm / geliyorum" yanıtı. */
         const val TYPE_SOS = "sos"
         const val TYPE_SOS_ACK = "sosa"
+        /** Haritadaki ortak işaretler (su kaynağı, tehlike, ...). */
+        const val TYPE_PIN = "pin"
 
         const val DEFAULT_TTL = 6
         const val ANNOUNCE_TTL = 4

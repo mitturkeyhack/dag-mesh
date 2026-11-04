@@ -80,6 +80,13 @@ object TrailRecorder {
         updateListening()
     }
 
+    /** Harita ekranı açıkken canlı konum için GPS'i dinle. */
+    private var mapWatch = false
+    fun watchForMap(on: Boolean) {
+        mapWatch = on
+        updateListening()
+    }
+
     fun clear() {
         setRecording(false)
         _returning.value = false
@@ -97,7 +104,7 @@ object TrailRecorder {
     @SuppressLint("MissingPermission")
     private fun updateListening() {
         val ctx = app ?: return
-        val want = _recording.value || _returning.value
+        val want = _recording.value || _returning.value || mapWatch
         val lm = ctx.getSystemService(LocationManager::class.java) ?: return
         if (want && !listening) {
             try {
