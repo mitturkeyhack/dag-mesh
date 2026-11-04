@@ -7,7 +7,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.cachemanager.CacheManager
 import org.osmdroid.tileprovider.tilesource.ITileSource
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.util.MapTileIndex
+import org.osmdroid.tileprovider.modules.SqlTileWriter
 import org.osmdroid.tileprovider.tilesource.TileSourcePolicy
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.BoundingBox
@@ -33,7 +35,16 @@ object OfflineMap {
         TileSourcePolicy(2, TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL or TileSourcePolicy.FLAG_USER_AGENT_NORMALIZED),
     )
 
-    val STREET: ITileSource = TileSourceFactory.MAPNIK
+    /** Uydu görüntüsü (Esri World Imagery). Toplu indirmeye kapalı, sadece gezinirken önbelleğe alınır. */
+    val SATELLITE: ITileSource = object : OnlineTileSourceBase(
+        "EsriWorldImagery", 0, 18, 256, ".jpg",
+        arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
+        "Esri, Maxar, Earthstar Geographics",
+        TileSourcePolicy(2, TileSourcePolicy.FLAG_NO_BULK or TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL),
+    ) {
+        override fun getTileURLString(pMapTileIndex: Long): String =
+            baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" + MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
+    }
 
     /** Tek seferde indirilebilecek en fazla karo (≈ 150–250 MB). */
     const val MAX_TILES = 12_000
@@ -65,6 +76,10 @@ object OfflineMap {
             // İndirilen karolar uzun süre geçerli sayılsın; internetsizken zaten süresi geçmiş olanlar da gösterilir.
             expirationOverrideDuration = 60L * 24 * 3_600_000
         }
+        // Eski sürümdeki OSM sokak katmanı engellendi; önbellekte kalan "erişim engellendi" karolarını temizle.
+        Thread {
+            try { SqlTileWriter().apply { purgeCache("Mapnik"); onDetach() } } catch (_: Throwable) {}
+        }.start()
     }
 
     /** Telefonda kayıtlı harita boyutu (MB). */

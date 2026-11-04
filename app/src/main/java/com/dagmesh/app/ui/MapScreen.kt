@@ -193,7 +193,7 @@ private fun MapPane(contentPadding: PaddingValues) {
         }
     }
 
-    LaunchedEffect(topo) { mapView.setTileSource(if (topo) OfflineMap.TOPO else OfflineMap.STREET) }
+    LaunchedEffect(topo) { mapView.setTileSource(if (topo) OfflineMap.TOPO else OfflineMap.SATELLITE) }
 
     // İlk GPS konumu gelince oraya git.
     LaunchedEffect(here != null) {
@@ -304,7 +304,7 @@ private fun MapPane(contentPadding: PaddingValues) {
         )
 
         Text(
-            if (topo) "© OpenStreetMap · OpenTopoMap" else "© OpenStreetMap",
+            if (topo) "© OpenStreetMap · OpenTopoMap" else "© Esri, Maxar, Earthstar Geographics",
             fontSize = 9.sp,
             color = Color.Black.copy(alpha = 0.7f),
             modifier = Modifier
