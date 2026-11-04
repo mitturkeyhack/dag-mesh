@@ -152,7 +152,7 @@ private fun MapPane(contentPadding: PaddingValues) {
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             isTilesScaledToDpi = true
             minZoomLevel = 4.0
-            maxZoomLevel = 18.0
+            maxZoomLevel = 20.0
             val start = TrailRecorder.current.value ?: LocationHelper.lastKnownQuick(context)
             if (start != null) {
                 controller.setZoom(15.0)
@@ -193,7 +193,12 @@ private fun MapPane(contentPadding: PaddingValues) {
         }
     }
 
-    LaunchedEffect(topo) { mapView.setTileSource(if (topo) OfflineMap.TOPO else OfflineMap.SATELLITE) }
+    LaunchedEffect(topo) {
+        // Uyduda karoları ekran yoğunluğuna büyütme: her piksel gerçek görüntü olsun, keskin görünsün.
+        mapView.isTilesScaledToDpi = topo
+        mapView.setTileSource(if (topo) OfflineMap.TOPO else OfflineMap.SATELLITE)
+        mapView.invalidate()
+    }
 
     // İlk GPS konumu gelince oraya git.
     LaunchedEffect(here != null) {

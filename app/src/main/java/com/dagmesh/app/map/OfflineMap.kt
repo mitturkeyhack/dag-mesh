@@ -37,7 +37,7 @@ object OfflineMap {
 
     /** Uydu görüntüsü (Esri World Imagery). Toplu indirmeye kapalı, sadece gezinirken önbelleğe alınır. */
     val SATELLITE: ITileSource = object : OnlineTileSourceBase(
-        "EsriWorldImagery", 0, 18, 256, ".jpg",
+        "EsriWorldImagery", 0, 19, 256, ".jpg",
         arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
         "Esri, Maxar, Earthstar Geographics",
         TileSourcePolicy(2, TileSourcePolicy.FLAG_NO_BULK or TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL),
