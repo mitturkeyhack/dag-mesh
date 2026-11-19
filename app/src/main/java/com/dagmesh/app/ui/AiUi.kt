@@ -167,9 +167,10 @@ fun AiSettingsSheet(onDismiss: () -> Unit) {
     val served by ai.served.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
-    var url by remember { mutableStateOf(saved.baseUrl) }
+    // İlk açılışta EVREN'in adresi ve hızlı bir model hazır gelir; sadece anahtarı yapıştırmak yeter.
+    var url by remember { mutableStateOf(saved.baseUrl.ifBlank { AiClient.EVREN_BASE_URL }) }
     var key by remember { mutableStateOf(saved.apiKey) }
-    var model by remember { mutableStateOf(saved.model) }
+    var model by remember { mutableStateOf(saved.model.ifBlank { AiClient.EVREN_DEFAULT_MODEL }) }
     var share by remember { mutableStateOf(savedShare) }
     var showKey by remember { mutableStateOf(false) }
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -217,7 +218,7 @@ fun AiSettingsSheet(onDismiss: () -> Unit) {
                 placeholder = { Text("https://…/v1") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                supportingText = { Text("EVREN'in API bölümünde yazan adres") },
+                supportingText = { Text("EVREN için hazır yazılı, değiştirmene gerek yok") },
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
@@ -305,7 +306,7 @@ fun AiSettingsSheet(onDismiss: () -> Unit) {
                         busy = true
                         note = null
                         scope.launch {
-                            val result = AiClient.chat(draft, emptyList(), "Merhaba! Tek kısa cümleyle kendini tanıt.", maxTokens = 80)
+                            val result = AiClient.chat(draft, emptyList(), "Merhaba! Tek kısa cümleyle kendini tanıt.")
                             busy = false
                             when (result) {
                                 is AiClient.Result.Ok -> { note = "Çalışıyor: ${result.text}"; noteOk = true }

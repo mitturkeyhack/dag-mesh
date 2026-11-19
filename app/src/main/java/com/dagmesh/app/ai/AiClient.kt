@@ -19,6 +19,10 @@ object AiClient {
     /** Sohbetteki tek bir satır: "user" ya da "assistant". */
     data class Turn(val role: String, val content: String)
 
+    /** EVREN'in OpenAI uyumlu adresi ve hızlı varsayılan model (ayarlar boşsa bunlar önerilir). */
+    const val EVREN_BASE_URL = "https://evren-llmapi.ssyz.org.tr/v1"
+    const val EVREN_DEFAULT_MODEL = "gemma-4-31b"
+
     sealed class Result {
         data class Ok(val text: String) : Result()
         data class Fail(val reason: String) : Result()
@@ -44,7 +48,8 @@ object AiClient {
         config: AiConfig,
         history: List<Turn>,
         question: String,
-        maxTokens: Int = 700,
+        // Düşünen modellerde düşünme ve cevap aynı bütçeyi paylaşır; EVREN en az 2048 öneriyor.
+        maxTokens: Int = 2048,
     ): Result = withContext(Dispatchers.IO) {
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
@@ -57,17 +62,21 @@ object AiClient {
             .put("max_tokens", maxTokens)
             .put("temperature", 0.5)
             .put("stream", false)
+            // Düşünmeyi kapat: cevap daha hızlı gelir ve bütçe düşünmede bitmez (EVREN tüm sohbet modellerinde destekler).
+            .put("thinking", false)
 
         when (val response = request(config, "/chat/completions", body.toString(), timeoutMs = 90_000)) {
             is Http.Fail -> Result.Fail(response.reason)
             is Http.Ok -> try {
-                val content = JSONObject(response.body)
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .optString("content")
+                val choice = JSONObject(response.body).getJSONArray("choices").getJSONObject(0)
+                val content = choice.getJSONObject("message").optString("content")
                 val clean = cleanup(content)
-                if (clean.isBlank()) Result.Fail("Yapay zekâ boş cevap verdi") else Result.Ok(clean)
+                when {
+                    clean.isNotBlank() -> Result.Ok(clean)
+                    choice.optString("finish_reason") == "length" ->
+                        Result.Fail("Model cevabı bitiremedi (düşünmeye çok zaman harcadı). Başka bir model seç.")
+                    else -> Result.Fail("Yapay zekâ boş cevap verdi")
+                }
             } catch (e: Exception) {
                 Result.Fail("Cevap okunamadı (beklenmeyen biçim)")
             }
@@ -137,6 +146,14 @@ object AiClient {
     }
 
     private fun describeError(code: Int, detail: String?): String {
+        val errorCode = detail?.let { runCatching { JSONObject(it).optJSONObject("error")?.optString("code") }.getOrNull() }
+        when (errorCode) {
+            "terms_not_accepted" ->
+                return "Önce EVREN'in kullanım şartlarını kabul etmen gerekiyor: EVREN sitesinde Test Alanı'na gir, anahtarını yapıştır ve onayla (hesap başına bir kez)."
+            "model_not_found" -> return "Bu model bulunamadı. \"Modelleri getir\" ile listeden seç."
+            "rate_limit_exceeded", "token_rate_limit_exceeded" -> return "Dakikalık sınır doldu, biraz sonra tekrar dene."
+            "daily_token_limit_exceeded" -> return "Günlük EVREN kotası doldu, yarın sıfırlanır."
+        }
         val message = detail?.let {
             runCatching { JSONObject(it).optJSONObject("error")?.optString("message") }.getOrNull()
                 ?: it.take(160)
