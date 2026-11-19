@@ -577,8 +577,10 @@ class MeshManager(
         // İnterneti ve yapay zekâ anahtarı olan telefon kendini "köprü" olarak duyurur.
         val mark = if (ai.isGatewayNow()) AiBridge.GATEWAY_MARK else null
         val packet = newPacket(Packet.TYPE_ANNOUNCE, to = null, ttl = Packet.ANNOUNCE_TTL, text = mark)
+        val bytes = encode(packet) ?: return
         remember(packet.pid)
-        sendPacket(packet)
+        // Duyuru, kimliğini henüz kanıtlamamış bağlantılara da gider: karşı taraf bizi ancak bununla doğrular.
+        sendTo(links.values.toList(), bytes)
     }
 
     // ---------------------------------------------------------------- gelen paketler
