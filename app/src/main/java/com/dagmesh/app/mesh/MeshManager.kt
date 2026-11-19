@@ -226,6 +226,8 @@ class MeshManager(
         }
         blocked.entries.removeIf { it.value < now }
         _outdatedNearby.value = blocked.size
+        // Henüz doğrulanmamış bağlantı varsa duyuruyu tekrarla: ilk duyuru zamanlama yüzünden kaçmış olabilir.
+        if (links.values.any { !it.verified }) announce()
     }
 
     private fun isBlocked(userId: String): Boolean = (blocked[userId] ?: 0L) > System.currentTimeMillis()
@@ -782,7 +784,7 @@ class MeshManager(
 
     companion object {
         private const val TICK_MS = 10_000L
-        private const val VERIFY_TIMEOUT_MS = 30_000L
+        private const val VERIFY_TIMEOUT_MS = 45_000L
         private const val OUTDATED_BLOCK_MS = 10L * 60 * 1000
         private const val SOS_WINDOW_MS = 10L * 60 * 1000
         private const val SOS_MAX_PER_WINDOW = 3
