@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import com.dagmesh.app.data.PowerMode
+import com.dagmesh.app.ai.AiBridge
+import androidx.compose.material.icons.rounded.AutoAwesome
 import com.dagmesh.app.sos.SosManager
 import com.dagmesh.app.trail.TrailRecorder
 import kotlinx.coroutines.delay
@@ -164,6 +166,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
     var showPower by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showSosSheet by remember { mutableStateOf(false) }
+    var showAi by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(Tab.RADAR) }
     var holdProgress by remember { mutableFloatStateOf(0f) }
     var hintTick by remember { mutableIntStateOf(0) }
@@ -203,6 +206,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
 
     if (showShare) ShareSheet(onDismiss = { showShare = false })
     if (showPower) PowerSheet(onDismiss = { showPower = false })
+    if (showAi) AiSettingsSheet(onDismiss = { showAi = false })
     val out = sosOutgoing
     if (showSosSheet && out != null) {
         ModalBottomSheet(
@@ -292,6 +296,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                             onRename = { showRename = true },
                             onPower = { showPower = true },
                             onShare = { showShare = true },
+                            onAi = { showAi = true },
                             onToggleNetwork = { toggleNetwork() },
                         )
                     }
@@ -498,6 +503,8 @@ private fun ChatsTab(
     onOpenChat: (String) -> Unit,
     onGoRadar: () -> Unit,
 ) {
+    val aiRow = conversations.firstOrNull { it.peerId == AiBridge.PEER_ID }
+    val chats = conversations.filter { it.peerId != AiBridge.PEER_ID }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = contentPadding.calculateBottomPadding()),
@@ -527,7 +534,14 @@ private fun ChatsTab(
                 }
             }
         }
-        if (conversations.isEmpty()) {
+        item(key = "ai") {
+            Column {
+                SectionHeader("YAPAY ZEKÂ", null)
+                Spacer(Modifier.height(8.dp))
+                AiEntryCard(aiRow) { onOpenChat(AiBridge.PEER_ID) }
+            }
+        }
+        if (chats.isEmpty()) {
             item(key = "empty") {
                 Column(
                     Modifier.fillMaxWidth().padding(top = 48.dp, start = 24.dp, end = 24.dp),
@@ -552,7 +566,7 @@ private fun ChatsTab(
             }
         } else {
             item(key = "h-chats") { SectionHeader("SOHBETLER", null) }
-            items(conversations, key = { "c-" + it.peerId }) { row ->
+            items(chats, key = { "c-" + it.peerId }) { row ->
                 ConversationItem(row, online = peersMap[row.peerId] != null) { onOpenChat(row.peerId) }
             }
         }
@@ -569,6 +583,7 @@ private fun ProfileTab(
     onRename: () -> Unit,
     onPower: () -> Unit,
     onShare: () -> Unit,
+    onAi: () -> Unit,
     onToggleNetwork: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -633,6 +648,15 @@ private fun ProfileTab(
                     subtitle = if (fallOn) "Açık · düşersen 30 sn sonra SOS" else "Kapalı",
                     onClick = { com.dagmesh.app.sos.FallDetector.setEnabled(!fallOn) },
                     trailing = { Switch(checked = fallOn, onCheckedChange = { com.dagmesh.app.sos.FallDetector.setEnabled(it) }) },
+                )
+                RowDivider()
+                val aiMode by App.instance.mesh.ai.mode.collectAsStateWithLifecycle()
+                SettingRow(
+                    icon = Icons.Rounded.AutoAwesome,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = "Yapay zekâ (EVREN)",
+                    subtitle = aiStatusText(aiMode),
+                    onClick = onAi,
                 )
                 RowDivider()
                 SettingRow(

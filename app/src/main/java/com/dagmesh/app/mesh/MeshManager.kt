@@ -2,6 +2,7 @@ package com.dagmesh.app.mesh
 
 import android.content.Context
 import android.os.Build
+import com.dagmesh.app.ai.AiBridge
 import com.dagmesh.app.call.CallManager
 import com.dagmesh.app.media.LocationHelper
 import com.dagmesh.app.sos.SosManager
@@ -106,6 +107,9 @@ class MeshManager(
     }
     private var tickerJob: Job? = null
 
+    /** Yapay zekâ köprüsü (EVREN). Kişiler listesi hazır olduktan sonra kurulmalı. */
+    val ai = AiBridge(appContext, dao, scope, this)
+
     val myName: String get() = identity.name.value ?: "?"
     val myId: String get() = identity.userId
 
@@ -125,7 +129,10 @@ class MeshManager(
                 tick++
                 transports.forEach { it.tick() }
                 expirePeers()
-                if (tick % ANNOUNCE_EVERY_TICKS == 0) announce()
+                if (tick % ANNOUNCE_EVERY_TICKS == 0) {
+                    announce()
+                    ai.tick()
+                }
             }
         }
     }
@@ -247,6 +254,7 @@ class MeshManager(
         val newValue = if (message.myReaction == emoji) null else emoji
         scope.launch {
             dao.setMyReaction(message.id, newValue)
+            if (message.peerId == AiBridge.PEER_ID) return@launch // yapay zekâya tepki gitmez
             val packet = newPacket(Packet.TYPE_REACT, to = message.peerId, ref = message.id, text = newValue.orEmpty())
             remember(packet.pid)
             sendPacket(packet)
@@ -289,6 +297,10 @@ class MeshManager(
 
     /** Mesajı ağa verir. Her denemede yeni paket kimliği alır, böylece yeniden gönderim zincirde engellenmez. */
     private fun transmit(message: MessageEntity) {
+        if (message.peerId == AiBridge.PEER_ID) {
+            ai.transmit(message)
+            return
+        }
         if (message.isMedia) {
             media.send(message)
             return
@@ -359,6 +371,21 @@ class MeshManager(
     }
 
     /** Sadece doğrudan bağlı kişiye gönderir (arama sinyalleri ve ses için). */
+    /** Paketi (zincirleme) gönderir; gönderecek kimse yoksa false döner. */
+    fun sendTracked(packet: Packet, onResult: (Boolean) -> Unit): Boolean {
+        val targets = route(packet.to)
+        if (targets.isEmpty()) return false
+        remember(packet.pid)
+        sendTo(targets, packet.toBytes(), onResult)
+        return true
+    }
+
+    /** Paketi (zincirleme) gönderir, sonucu beklemez. */
+    fun send(packet: Packet) {
+        remember(packet.pid)
+        sendPacket(packet)
+    }
+
     fun sendDirect(packet: Packet): Boolean {
         val link = packet.to?.let { _peers.value[it]?.linkId }?.let { links[it] } ?: return false
         link.transport.send(listOf(link.linkId), packet.toBytes(), null)
@@ -410,7 +437,7 @@ class MeshManager(
     suspend fun markConversationRead(peerId: String) {
         val ids = dao.unreadIncomingIds(peerId)
         dao.markRead(peerId)
-        if (ids.isEmpty()) return
+        if (ids.isEmpty() || peerId == AiBridge.PEER_ID) return
         ids.chunked(40).forEach { batch ->
             val packet = newPacket(Packet.TYPE_READ, to = peerId, text = batch.joinToString(","))
             remember(packet.pid)
@@ -420,6 +447,7 @@ class MeshManager(
 
     /** Yazarken çağrılır; karşı tarafa en fazla 3 sn'de bir "yazıyor" sinyali gider. */
     fun notifyTyping(peerId: String) {
+        if (peerId == AiBridge.PEER_ID) return
         val now = System.currentTimeMillis()
         if (now - (lastTypingSent[peerId] ?: 0L) < TYPING_SEND_INTERVAL_MS) return
         lastTypingSent[peerId] = now
@@ -463,9 +491,16 @@ class MeshManager(
         _incoming.tryEmit(IncomingMessage(peerId, peerName, text))
     }
 
+    /** Köprü durumu değişince komşulara hemen haber ver. */
+    fun announceNow() {
+        if (_running.value) scope.launch { announce() }
+    }
+
     private fun announce() {
         if (links.isEmpty()) return
-        val packet = newPacket(Packet.TYPE_ANNOUNCE, to = null, ttl = Packet.ANNOUNCE_TTL)
+        // İnterneti ve yapay zekâ anahtarı olan telefon kendini "köprü" olarak duyurur.
+        val mark = if (ai.isGatewayNow()) AiBridge.GATEWAY_MARK else null
+        val packet = newPacket(Packet.TYPE_ANNOUNCE, to = null, ttl = Packet.ANNOUNCE_TTL, text = mark)
         remember(packet.pid)
         sendPacket(packet)
     }
@@ -480,7 +515,14 @@ class MeshManager(
         val forMe = packet.to == identity.userId
 
         when (packet.type) {
-            Packet.TYPE_ANNOUNCE -> forward(packet, fromLinkId)
+            Packet.TYPE_ANNOUNCE -> {
+                ai.onAnnounce(packet)
+                forward(packet, fromLinkId)
+            }
+
+            // Yapay zekâ köprüsü: soru köprüye, cevap soran telefona gider.
+            Packet.TYPE_AI_Q -> if (forMe) ai.onQuestion(packet) else forward(packet, fromLinkId)
+            Packet.TYPE_AI_A -> if (forMe) ai.onAnswer(packet) else forward(packet, fromLinkId)
 
             // Acil durum: herkes işler ve herkese iletir.
             Packet.TYPE_SOS -> {

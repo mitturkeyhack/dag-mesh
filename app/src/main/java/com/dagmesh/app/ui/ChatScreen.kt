@@ -97,6 +97,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import com.dagmesh.app.media.VoiceRecorder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.dagmesh.app.ai.AiBridge
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.FilledTonalButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,7 +114,11 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
         .collectAsStateWithLifecycle(initialValue = null)
     val peers by app.mesh.peers.collectAsStateWithLifecycle()
     val live = peers[peerId]
-    val name = live?.name ?: stored?.name ?: "Bilinmeyen"
+    val isAi = peerId == AiBridge.PEER_ID
+    val name = if (isAi) AiBridge.NAME else live?.name ?: stored?.name ?: "Bilinmeyen"
+    val aiMode by app.mesh.ai.mode.collectAsStateWithLifecycle()
+    val aiThinking by app.mesh.ai.thinking.collectAsStateWithLifecycle()
+    var showAiSettings by remember { mutableStateOf(false) }
     var locating by remember { mutableStateOf(false) }
 
     // "yazıyor…": karşı taraf yazdıkça süre uzar, bitince kendiliğinden kaybolur.
@@ -214,9 +221,10 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         scope.launch { app.mesh.markConversationRead(peerId) }
     }
-    LaunchedEffect(messages.size) {
+    val showThinking = isAi && aiThinking.isNotEmpty()
+    LaunchedEffect(messages.size, showThinking) {
         if (App.isInForeground) app.mesh.markConversationRead(peerId)
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex + if (showThinking) 1 else 0)
     }
     LaunchedEffect(recording) {
         while (recording) {
@@ -237,6 +245,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     }
 
     viewerPath?.let { path -> ImageViewer(path) { viewerPath = null } }
+    if (showAiSettings) AiSettingsSheet(onDismiss = { showAiSettings = false })
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -252,13 +261,20 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Avatar(peerId, name, size = 38.dp, online = live?.isDirect == true)
+                        if (isAi) AiAvatar(38.dp) else Avatar(peerId, name, size = 38.dp, online = live?.isDirect == true)
                         Column {
                             Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                if (typingVisible) "yazıyor…" else peerStatus(live),
+                                when {
+                                    isAi && aiThinking.isNotEmpty() -> "düşünüyor…"
+                                    isAi -> aiStatusText(aiMode)
+                                    typingVisible -> "yazıyor…"
+                                    else -> peerStatus(live)
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = when {
+                                    isAi && aiThinking.isNotEmpty() -> MaterialTheme.colorScheme.primary
+                                    isAi -> aiStatusColor(aiMode)
                                     typingVisible -> MaterialTheme.colorScheme.primary
                                     live == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                     live.isDirect -> MaterialTheme.colorScheme.secondary
@@ -271,7 +287,11 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(
+                    if (isAi) {
+                        IconButton(onClick = { showAiSettings = true }) {
+                            Icon(Icons.Rounded.Tune, contentDescription = "Yapay zekâ ayarları", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    } else IconButton(
                         onClick = {
                             if (live?.isDirect == true) withMic("call") { startCall() }
                             else toast("Arama için kişinin doğrudan bağlı olması gerekir")
@@ -327,7 +347,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                             },
                         )
                     } else {
-                        Box {
+                        if (!isAi) Box {
                             IconButton(onClick = { menuOpen = true }) {
                                 Icon(
                                     Icons.Rounded.AddCircle,
@@ -369,7 +389,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                                 input = it
                                 if (it.isNotBlank()) app.mesh.notifyTyping(peerId)
                             },
-                            placeholder = { Text("Mesaj yaz") },
+                            placeholder = { Text(if (isAi) "Bir şey sor" else "Mesaj yaz") },
                             shape = RoundedCornerShape(24.dp),
                             maxLines = 5,
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -381,9 +401,14 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                             ),
                             modifier = Modifier.weight(1f),
                         )
-                        val textMode = input.isNotBlank()
+                        val textMode = input.isNotBlank() || isAi
                         FilledIconButton(
-                            onClick = { if (textMode) sendText() else withMic("record") { startRecording() } },
+                            onClick = {
+                                when {
+                                    input.isNotBlank() -> sendText()
+                                    !isAi -> withMic("record") { startRecording() }
+                                }
+                            },
                             modifier = Modifier.size(52.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
@@ -412,7 +437,31 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
             ),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            if (messages.isEmpty()) {
+            if (isAi && messages.isEmpty()) {
+                item(key = "ai-hint") {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        AiAvatar(72.dp)
+                        Text(
+                            "Yapay zekâya soru sor.\n" +
+                                "İnternetin varsa doğrudan sorarsın. Yoksa sorun telefondan telefona atlayarak " +
+                                "interneti olan bir \"köprü\" telefona gider, cevap aynı yoldan geri gelir.\n" +
+                                "Köprü yoksa soru sırada bekler, bulununca kendiliğinden gider.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        if (aiMode == AiBridge.Mode.NotConfigured) {
+                            FilledTonalButton(onClick = { showAiSettings = true }, shape = RoundedCornerShape(14.dp)) {
+                                Text("EVREN bilgilerini gir")
+                            }
+                        }
+                    }
+                }
+            } else if (messages.isEmpty()) {
                 item(key = "hint") {
                     Text(
                         "Mesajlar internetsiz, telefondan telefona gider.\n" +
@@ -446,6 +495,9 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                         else toast("Alıntılanan mesaj silinmiş")
                     },
                 )
+            }
+            if (showThinking) {
+                item(key = "ai-thinking") { AiThinkingRow(aiMode) }
             }
         }
     }
@@ -604,5 +656,32 @@ private fun LocatingStrip() {
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+
+/** Yapay zekâ cevap hazırlarken sohbetin altında görünen satır. */
+@Composable
+private fun AiThinkingRow(mode: AiBridge.Mode) {
+    Row(
+        Modifier.padding(start = 4.dp, top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        AiAvatar(28.dp)
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(18.dp)) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    if (mode is AiBridge.Mode.ViaGateway) "Köprü üzerinden soruluyor…" else "Düşünüyor…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }

@@ -104,6 +104,9 @@ data class Packet(
         const val TYPE_SOS_ACK = "sosa"
         /** Haritadaki ortak işaretler (su kaynağı, tehlike, ...). */
         const val TYPE_PIN = "pin"
+        /** Yapay zekâ köprüsü: soru (köprüye) ve cevap (soran telefona). */
+        const val TYPE_AI_Q = "aiq"
+        const val TYPE_AI_A = "aia"
 
         const val DEFAULT_TTL = 6
         const val ANNOUNCE_TTL = 4

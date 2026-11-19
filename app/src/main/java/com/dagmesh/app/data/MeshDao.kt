@@ -16,6 +16,10 @@ interface MeshDao {
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun message(id: String): MessageEntity?
 
+    /** Bir sohbetin en yeni mesajları (yeniden eskiye). */
+    @Query("SELECT * FROM messages WHERE peerId = :peerId ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun recent(peerId: String, limit: Int): List<MessageEntity>
+
     /** Aynı mesaj ikinci kez gelirse yok sayılır; dönen -1 bunun işaretidir. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMessage(message: MessageEntity): Long
