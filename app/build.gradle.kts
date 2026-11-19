@@ -102,4 +102,7 @@ dependencies {
     // Bluetooth, BLE, Wi‑Fi Direct ve hotspot bağlantılarını otomatik birleştiren Google Nearby Connections
     implementation("com.google.android.gms:play-services-nearby:19.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Uçtan uca şifreleme: Ed25519 imza, X25519 anahtar değişimi, HKDF (Google Tink)
+    implementation("com.google.crypto.tink:tink-android:1.15.0")
 }

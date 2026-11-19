@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import com.dagmesh.app.ai.AiBridge
 import com.dagmesh.app.call.CallManager
+import com.dagmesh.app.crypto.MeshCrypto
 import com.dagmesh.app.media.LocationHelper
 import com.dagmesh.app.sos.SosManager
 import com.dagmesh.app.data.Identity
@@ -63,7 +64,15 @@ class MeshManager(
 
     data class IncomingMessage(val peerId: String, val peerName: String, val text: String)
 
-    private data class Link(val linkId: String, val userId: String, val transport: Transport)
+    /**
+     * Doğrudan bağlantı. Karşı tarafın söylediği kimlik, imzalı duyurusu doğrulanana kadar güvenilmez:
+     * doğrulanmamış bağlantıya mesaj yönlendirilmez, 30 sn içinde doğrulanmazsa kapatılır.
+     */
+    private class Link(val linkId: String, val userId: String, val userName: String, val transport: Transport) {
+        val since: Long = System.currentTimeMillis()
+        @Volatile var verified = false
+        @Volatile var sawOldProtocol = false
+    }
 
     val appContext: Context = context.applicationContext
 
@@ -107,6 +116,19 @@ class MeshManager(
     }
     private var tickerJob: Job? = null
 
+    /** Uçtan uca şifreleme ve imza. */
+    val crypto = MeshCrypto(appContext, identity.vault)
+
+    /** Eski (şifresiz) sürümle gelen telefonlar: kimlik → engel bitiş zamanı. */
+    private val blocked = ConcurrentHashMap<String, Long>()
+    private val _outdatedNearby = MutableStateFlow(0)
+    /** Yakında eski sürüm kullandığı için bağlanılamayan telefon sayısı (güncellemeleri gerekir). */
+    val outdatedNearby: StateFlow<Int> = _outdatedNearby.asStateFlow()
+
+    /** SOS sınırı: kişi → son yeni SOS'ların zamanları. */
+    private val sosStarts = ConcurrentHashMap<String, ArrayDeque<Long>>()
+    private val knownSos = ConcurrentHashMap.newKeySet<String>()
+
     /** Yapay zekâ köprüsü (EVREN). Kişiler listesi hazır olduktan sonra kurulmalı. */
     val ai = AiBridge(appContext, dao, scope, this)
 
@@ -129,6 +151,7 @@ class MeshManager(
                 tick++
                 transports.forEach { it.tick() }
                 expirePeers()
+                checkLinks()
                 if (tick % ANNOUNCE_EVERY_TICKS == 0) {
                     announce()
                     ai.tick()
@@ -153,35 +176,63 @@ class MeshManager(
         transports.forEach { it.stop() }
         links.clear()
         _peers.value = emptyMap()
+        _outdatedNearby.value = 0
     }
 
     fun isDirect(userId: String): Boolean = _peers.value[userId]?.isDirect == true
 
     // ---------------------------------------------------------------- kanal olayları
 
-    override fun isConnected(userId: String): Boolean = links.values.any { it.userId == userId }
+    /** Doğrulanmış bağlantı varsa ya da telefon eski sürüm diye engelliyse yeniden bağlanmaya gerek yok. */
+    override fun isConnected(userId: String): Boolean =
+        isBlocked(userId) || links.values.any { it.userId == userId && it.verified }
 
     override fun onLinkUp(transport: Transport, linkId: String, userId: String, userName: String) {
         if (isConnected(userId)) {
-            // Bu kişiye başka bir kanaldan zaten bağlıyız; fazlasını kapat.
+            // Bu kişiye başka bir kanaldan zaten (doğrulanmış) bağlıyız ya da eski sürüm: kapat.
             transport.disconnect(linkId)
             return
         }
-        links[linkId] = Link(linkId, userId, transport)
-        val now = System.currentTimeMillis()
-        _peers.update { it + (userId to Peer(userId, userName, 1, now, linkId, transport.label)) }
+        // Henüz doğrulanmadı: kişi listesine ve yönlendirmeye ancak imzalı duyurusu gelince girer.
+        links[linkId] = Link(linkId, userId, userName, transport)
         if (_error.value != null && transport.state.value == TransportState.ACTIVE) _error.value = null
+        scope.launch { announce() }
+    }
 
+    /** Bağlantının sahibi imzalı duyurusuyla kimliğini kanıtladı. */
+    private fun onLinkVerified(link: Link, name: String) {
+        if (link.verified) return
+        link.verified = true
+        // Aynı kişiye doğrulanmamış başka bağlantılar varsa kapat.
+        links.values.filter { it !== link && it.userId == link.userId && !it.verified }.forEach {
+            links.remove(it.linkId)
+            it.transport.disconnect(it.linkId)
+        }
+        val now = System.currentTimeMillis()
+        _peers.update { it + (link.userId to Peer(link.userId, name, 1, now, link.linkId, link.transport.label)) }
         scope.launch {
-            dao.upsertPeer(PeerEntity(userId, userName, now))
-            announce()
+            dao.upsertPeer(PeerEntity(link.userId, name, now))
             flushPending()
         }
     }
 
+    /** 30 sn'de kimliğini kanıtlamayan bağlantıyı kapatır; eski sürümse bir süre engeller. */
+    private fun checkLinks() {
+        val now = System.currentTimeMillis()
+        links.values.filter { !it.verified && now - it.since > VERIFY_TIMEOUT_MS }.forEach { link ->
+            links.remove(link.linkId)
+            link.transport.disconnect(link.linkId)
+            if (link.sawOldProtocol) blocked[link.userId] = now + OUTDATED_BLOCK_MS
+        }
+        blocked.entries.removeIf { it.value < now }
+        _outdatedNearby.value = blocked.size
+    }
+
+    private fun isBlocked(userId: String): Boolean = (blocked[userId] ?: 0L) > System.currentTimeMillis()
+
     override fun onLinkDown(linkId: String) {
         val link = links.remove(linkId) ?: return
-        val replacement = links.values.firstOrNull { it.userId == link.userId }
+        val replacement = links.values.firstOrNull { it.userId == link.userId && it.verified }
         _peers.update { map ->
             val peer = map[link.userId]
             when {
@@ -197,9 +248,16 @@ class MeshManager(
 
     override fun onData(linkId: String, bytes: ByteArray) {
         val packet = Packet.parse(bytes) ?: return
+        if (packet.version < Packet.PROTOCOL_VERSION) {
+            // Eski, şifresiz sürüm: işlenmez ve ilerletilmez (ilerletilse şifreli alanları bozardı).
+            links[linkId]?.sawOldProtocol = true
+            return
+        }
         // Ses kareleri gecikmeye çok duyarlı: sıraya sokmadan hemen işle.
         if (packet.type == Packet.TYPE_AUDIO) {
-            if (packet.to == identity.userId) calls.onAudio(packet)
+            if (packet.to == identity.userId && links[linkId]?.verified == true) {
+                crypto.open(packet)?.let { calls.onAudio(it) }
+            }
             return
         }
         scope.launch { handle(linkId, packet) }
@@ -315,28 +373,42 @@ class MeshManager(
                 replyText = message.replyText,
                 replyAuthor = message.replyAuthor,
             )
+        // Alıcının anahtarı henüz bilinmiyorsa mesaj sırada bekler; anahtar öğrenilince gider.
+        val bytes = encode(packet) ?: return
         remember(packet.pid)
-        sendTo(targets, packet.toBytes()) { ok ->
+        sendTo(targets, bytes) { ok ->
             if (ok) scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
         }
     }
 
-    private suspend fun flushPending() {
+    private suspend fun flushPending(onlyPeer: String? = null) {
         val since = System.currentTimeMillis() - RESEND_WINDOW_MS
         for (message in dao.unconfirmed(since)) {
+            if (onlyPeer != null && message.peerId != onlyPeer) continue
             transmit(message)
             delay(60)
         }
     }
 
+    /**
+     * Paketi gönderilecek baytlara çevirir. Bu telefonun oluşturduğu paket burada mühürlenir
+     * (kişiye özelse şifrelenir, herkese gidiyorsa imzalanır). Başkasından gelip ilerletilen paket
+     * olduğu gibi gider. Alıcının anahtarı bilinmiyorsa null.
+     */
+    private fun encode(packet: Packet): ByteArray? =
+        if (packet.from == identity.userId && !packet.isSealed) crypto.seal(packet)?.toBytes() else packet.toBytes()
+
     // ---------------------------------------------------------------- yönlendirme
 
-    /** Alıcı doğrudan bağlıysa sadece ona, değilse tüm komşulara (kişi başına tek kanal). */
+    /**
+     * Alıcı doğrudan bağlıysa sadece ona, değilse tüm komşulara (kişi başına tek kanal).
+     * Sadece kimliğini kanıtlamış bağlantılar kullanılır.
+     */
     private fun route(userId: String?): List<Link> {
         val directId = userId?.let { _peers.value[it]?.linkId }
-        val direct = directId?.let { links[it] }
+        val direct = directId?.let { links[it] }?.takeIf { it.verified }
         if (direct != null) return listOf(direct)
-        return links.values.groupBy { it.userId }.values.map { it.first() }
+        return links.values.filter { it.verified }.groupBy { it.userId }.values.map { it.first() }
     }
 
     private fun sendTo(targets: List<Link>, bytes: ByteArray, onResult: ((Boolean) -> Unit)? = null) {
@@ -348,7 +420,9 @@ class MeshManager(
     private fun sendPacket(packet: Packet, exceptLinkId: String? = null) {
         val exceptUser = exceptLinkId?.let { links[it]?.userId }
         val targets = route(packet.to).filter { it.linkId != exceptLinkId && it.userId != exceptUser }
-        if (targets.isNotEmpty()) sendTo(targets, packet.toBytes())
+        if (targets.isEmpty()) return
+        val bytes = encode(packet) ?: return
+        sendTo(targets, bytes)
     }
 
     /**
@@ -358,8 +432,8 @@ class MeshManager(
     suspend fun sendAwait(packet: Packet, timeoutMs: Long = 15_000): Boolean {
         val targets = route(packet.to)
         if (targets.isEmpty()) return false
+        val bytes = encode(packet) ?: return false
         remember(packet.pid)
-        val bytes = packet.toBytes()
         return withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine { cont ->
                 val done = AtomicBoolean(false)
@@ -375,8 +449,9 @@ class MeshManager(
     fun sendTracked(packet: Packet, onResult: (Boolean) -> Unit): Boolean {
         val targets = route(packet.to)
         if (targets.isEmpty()) return false
+        val bytes = encode(packet) ?: return false
         remember(packet.pid)
-        sendTo(targets, packet.toBytes(), onResult)
+        sendTo(targets, bytes, onResult)
         return true
     }
 
@@ -387,8 +462,9 @@ class MeshManager(
     }
 
     fun sendDirect(packet: Packet): Boolean {
-        val link = packet.to?.let { _peers.value[it]?.linkId }?.let { links[it] } ?: return false
-        link.transport.send(listOf(link.linkId), packet.toBytes(), null)
+        val link = packet.to?.let { _peers.value[it]?.linkId }?.let { links[it] }?.takeIf { it.verified } ?: return false
+        val bytes = encode(packet) ?: return false
+        link.transport.send(listOf(link.linkId), bytes, null)
         return true
     }
 
@@ -507,12 +583,40 @@ class MeshManager(
 
     // ---------------------------------------------------------------- gelen paketler
 
-    private suspend fun handle(fromLinkId: String, packet: Packet) {
-        if (packet.from == identity.userId) return
-        if (!remember(packet.pid)) return // bu paketi daha önce işledik
+    private suspend fun handle(fromLinkId: String, raw: Packet) {
+        if (raw.from == identity.userId) return
+        val link = links[fromLinkId] ?: return
+        // Kimliğini henüz kanıtlamamış bağlantıdan sadece kendi duyurusu kabul edilir.
+        if (!link.verified && !(raw.type == Packet.TYPE_ANNOUNCE && raw.hops == 0)) return
+        if (!remember(raw.pid)) return // bu paketi daha önce işledik
 
+        val forMe = raw.to == identity.userId
+        val hadKey = crypto.hasKey(raw.from)
+        val packet: Packet = when {
+            // Herkese giden: imzası tutmazsa atılır ve ilerletilmez (sahte SOS / işaret yayılmaz).
+            raw.to == null -> if (crypto.verifyBroadcast(raw)) raw else return
+            // Bana gelen: açılamazsa (sahte ya da bozuk) atılır.
+            forMe -> crypto.open(raw) ?: return
+            // Başkasına giden şifreli paket: okuyamayız, sadece taşırız.
+            else -> {
+                if (raw.type != Packet.TYPE_CALL) forward(raw, fromLinkId)
+                return
+            }
+        }
+        // Bu kişinin anahtarını ilk kez öğrendik: ona bekleyen mesajlarımızı şimdi gönderebiliriz.
+        if (!hadKey && crypto.hasKey(packet.from)) scope.launch { flushPending(onlyPeer = packet.from) }
+
+        if (packet.type == Packet.TYPE_ANNOUNCE && packet.hops == 0) {
+            if (link.userId == packet.from) {
+                onLinkVerified(link, packet.fromName)
+            } else {
+                // Bağlantıda başka kimlik söyleyip başkasının duyurusunu getiren: kapat.
+                links.remove(fromLinkId)
+                link.transport.disconnect(fromLinkId)
+                return
+            }
+        }
         notePeer(packet.from, packet.fromName, packet.hops + 1)
-        val forMe = packet.to == identity.userId
 
         when (packet.type) {
             Packet.TYPE_ANNOUNCE -> {
@@ -526,6 +630,7 @@ class MeshManager(
 
             // Acil durum: herkes işler ve herkese iletir.
             Packet.TYPE_SOS -> {
+                if (!allowSos(packet)) return
                 sos.onSos(packet)
                 forward(packet, fromLinkId)
             }
@@ -584,6 +689,25 @@ class MeshManager(
                     forward(packet, fromLinkId)
                 }
         }
+    }
+
+    /**
+     * Kişi başına 10 dakikada en fazla 3 yeni SOS. Aynı SOS'un konum güncellemeleri ve iptali sınırsız.
+     * Sahte SOS'u tamamen engellemez ama birinin ağı alarmla boğmasını önler.
+     */
+    private fun allowSos(packet: Packet): Boolean {
+        val ref = packet.ref ?: return false
+        val key = packet.from + "|" + ref
+        if (key in knownSos) return true
+        val now = System.currentTimeMillis()
+        val starts = sosStarts.getOrPut(packet.from) { ArrayDeque() }
+        synchronized(starts) {
+            while (starts.isNotEmpty() && now - starts.first() > SOS_WINDOW_MS) starts.removeFirst()
+            if (starts.size >= SOS_MAX_PER_WINDOW) return false
+            starts.addLast(now)
+        }
+        knownSos += key
+        return true
     }
 
     private suspend fun receiveText(packet: Packet) {
@@ -656,6 +780,10 @@ class MeshManager(
 
     companion object {
         private const val TICK_MS = 10_000L
+        private const val VERIFY_TIMEOUT_MS = 30_000L
+        private const val OUTDATED_BLOCK_MS = 10L * 60 * 1000
+        private const val SOS_WINDOW_MS = 10L * 60 * 1000
+        private const val SOS_MAX_PER_WINDOW = 3
         private const val ANNOUNCE_EVERY_TICKS = 3
         private const val PEER_TIMEOUT_MS = 100_000L
         private const val RESEND_WINDOW_MS = 48L * 60 * 60 * 1000

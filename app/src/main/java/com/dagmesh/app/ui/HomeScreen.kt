@@ -462,6 +462,21 @@ private fun RadarTab(
 
         item(key = "radar") { RadarCard(peers, running) }
 
+        item(key = "outdated") {
+            val outdated by App.instance.mesh.outdatedNearby.collectAsStateWithLifecycle()
+            if (outdated > 0) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Yakında $outdated telefon Dağ Mesh'in eski (şifresiz) sürümünü kullanıyor, onlarla bağlantı kurulamıyor. " +
+                            "Profil → Uygulamayı paylaş ile yeni sürümü internetsiz gönderebilirsin.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(14.dp),
+                    )
+                }
+            }
+        }
+
         if (showUpdate) item(key = "update") { UpdateBanner() }
 
         if (!permsGranted) {

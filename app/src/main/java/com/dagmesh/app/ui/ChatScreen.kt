@@ -99,6 +99,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.dagmesh.app.ai.AiBridge
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Verified
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.FilledTonalButton
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,6 +125,9 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
     val aiMode by app.mesh.ai.mode.collectAsStateWithLifecycle()
     val aiThinking by app.mesh.ai.thinking.collectAsStateWithLifecycle()
     var showAiSettings by remember { mutableStateOf(false) }
+    val verifiedSet by app.mesh.crypto.verified.collectAsStateWithLifecycle()
+    val isVerified = !isAi && peerId in verifiedSet
+    var showSafety by remember { mutableStateOf(false) }
     var locating by remember { mutableStateOf(false) }
 
     // "yazıyor…": karşı taraf yazdıkça süre uzar, bitince kendiliğinden kaybolur.
@@ -246,6 +255,7 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
 
     viewerPath?.let { path -> ImageViewer(path) { viewerPath = null } }
     if (showAiSettings) AiSettingsSheet(onDismiss = { showAiSettings = false })
+    if (showSafety) SafetyNumberDialog(peerId, name, isVerified) { showSafety = false }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -263,7 +273,23 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                     ) {
                         if (isAi) AiAvatar(38.dp) else Avatar(peerId, name, size = 38.dp, online = live?.isDirect == true)
                         Column {
-                            Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                if (isVerified) {
+                                    Icon(
+                                        Icons.Rounded.Verified,
+                                        contentDescription = "Doğrulanmış kişi",
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.padding(start = 4.dp).size(18.dp),
+                                    )
+                                }
+                            }
                             Text(
                                 when {
                                     isAi && aiThinking.isNotEmpty() -> "düşünüyor…"
@@ -287,6 +313,15 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
                     }
                 },
                 actions = {
+                    if (!isAi) {
+                        IconButton(onClick = { showSafety = true }) {
+                            Icon(
+                                Icons.Rounded.Lock,
+                                contentDescription = "Şifreleme ve güvenlik numarası",
+                                tint = if (isVerified) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     if (isAi) {
                         IconButton(onClick = { showAiSettings = true }) {
                             Icon(Icons.Rounded.Tune, contentDescription = "Yapay zekâ ayarları", tint = MaterialTheme.colorScheme.primary)
@@ -464,7 +499,8 @@ fun ChatScreen(peerId: String, onBack: () -> Unit) {
             } else if (messages.isEmpty()) {
                 item(key = "hint") {
                     Text(
-                        "Mesajlar internetsiz, telefondan telefona gider.\n" +
+                        "🔒 Mesajlar uçtan uca şifreli: aradaki telefonlar taşır ama okuyamaz.\n" +
+                            "Mesajlar internetsiz, telefondan telefona gider.\n" +
                             "Fotoğraf, video, dosya ve sesli mesaj gönderebilir; doğrudan bağlıyken sesli arama yapabilirsin.\n" +
                             "Kişi menzil dışındaysa gönderdiklerin sırada bekler, yaklaştığında otomatik gider.",
                         style = MaterialTheme.typography.bodyMedium,
@@ -684,4 +720,58 @@ private fun AiThinkingRow(mode: AiBridge.Mode) {
             }
         }
     }
+}
+
+
+/** Güvenlik numarası: iki telefonda da aynıysa aradaki kimse mesajları okuyamaz, kimse kişinin yerine geçemez. */
+@Composable
+private fun SafetyNumberDialog(peerId: String, name: String, verified: Boolean, onDismiss: () -> Unit) {
+    val crypto = App.instance.mesh.crypto
+    val number = remember(peerId) { crypto.safetyNumber(peerId) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
+        title = { Text("Uçtan uca şifreli") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (number == null) {
+                    Text(
+                        "$name kişisinin anahtarı henüz gelmedi. Menzile girdiğinde anahtarlar kendiliğinden değişir; o zamana kadar mesajların sırada bekler.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    Text(
+                        "Mesajlarınızı sadece siz ikiniz okuyabilirsiniz. Emin olmak için bu numarayı $name ile karşılaştırın: yüz yüze ya da telefonda. İkinizde de aynıysa arada kimse yok demektir.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(14.dp)) {
+                        Text(
+                            number,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp, horizontal = 8.dp),
+                        )
+                    }
+                    if (verified) {
+                        Text(
+                            "✓ Bu kişiyi doğruladın.",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (number != null) {
+                TextButton(onClick = {
+                    crypto.setVerified(peerId, !verified)
+                    onDismiss()
+                }) { Text(if (verified) "Doğrulamayı kaldır" else "Aynı, doğrulandı") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Kapat") } },
+    )
 }

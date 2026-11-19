@@ -4,16 +4,18 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.UUID
+import com.dagmesh.app.crypto.KeyVault
 
-/** Bu telefonun kalıcı kimliği (rastgele kimlik + görünen ad). */
+/**
+ * Bu telefonun kalıcı kimliği: anahtarlar + görünen ad.
+ * Kimlik, imza anahtarından türetilir (bkz. [KeyVault]); başkası bu kimlikle paket gönderemez.
+ */
 class Identity(context: Context) {
     private val prefs = context.getSharedPreferences("identity", Context.MODE_PRIVATE)
 
-    val userId: String = prefs.getString(KEY_ID, null)
-        ?: UUID.randomUUID().toString().replace("-", "").take(12).also {
-            prefs.edit().putString(KEY_ID, it).apply()
-        }
+    val vault = KeyVault(context)
+
+    val userId: String = vault.userId
 
     private val _name = MutableStateFlow(prefs.getString(KEY_NAME, null))
     val name: StateFlow<String?> = _name.asStateFlow()
@@ -26,7 +28,6 @@ class Identity(context: Context) {
     }
 
     private companion object {
-        const val KEY_ID = "id"
         const val KEY_NAME = "name"
     }
 }

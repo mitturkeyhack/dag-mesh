@@ -44,12 +44,22 @@ data class Packet(
     val replyAuthor: String? = null,
     /** Metin dışı ama dosya da olmayan mesaj türü (ör. konum). */
     val kind: String? = null,
+    /** Şifreli içerik (kişiye özel paketlerde metin, ek bilgileri ve dosya bilgisi bunun içinde). */
+    val sealed: String? = null,
+    /** Herkese giden paketlerde gönderenin imzası. */
+    val sig: String? = null,
+    /** Gönderenin açık anahtar belgesi (alıcı ilk kez görüyorsa anahtarı buradan öğrenir). */
+    val keyCert: String? = null,
+    /** Protokol sürümü. 3 = şifreli / imzalı; daha eskisi kabul edilmez. */
+    val version: Int = PROTOCOL_VERSION,
 ) {
+    val isSealed: Boolean get() = sealed != null || sig != null
+
     fun forwarded(): Packet = copy(ttl = ttl - 1, hops = hops + 1)
 
     fun toBytes(): ByteArray {
         val o = JSONObject()
-        o.put("v", 2)
+        o.put("v", version)
         o.put("t", type)
         o.put("p", pid)
         ref?.let { o.put("r", it) }
@@ -65,6 +75,9 @@ data class Packet(
         replyText?.let { o.put("rt", it) }
         replyAuthor?.let { o.put("ra", it) }
         kind?.let { o.put("kd", it) }
+        sealed?.let { o.put("ct", it) }
+        sig?.let { o.put("sg", it) }
+        keyCert?.let { o.put("kc", it) }
         media?.let { m ->
             o.put("k", m.kind)
             o.put("fn", m.name)
@@ -107,6 +120,8 @@ data class Packet(
         /** Yapay zekâ köprüsü: soru (köprüye) ve cevap (soran telefona). */
         const val TYPE_AI_Q = "aiq"
         const val TYPE_AI_A = "aia"
+
+        const val PROTOCOL_VERSION = 3
 
         const val DEFAULT_TTL = 6
         const val ANNOUNCE_TTL = 4
@@ -164,6 +179,10 @@ data class Packet(
                 replyText = o.stringOrNull("rt"),
                 replyAuthor = o.stringOrNull("ra"),
                 kind = o.stringOrNull("kd"),
+                sealed = o.stringOrNull("ct"),
+                sig = o.stringOrNull("sg"),
+                keyCert = o.stringOrNull("kc"),
+                version = o.optInt("v", 1),
             )
         }
 
