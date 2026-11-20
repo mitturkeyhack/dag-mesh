@@ -176,7 +176,8 @@ class PatternDetector(
     private val threshold: Double = 6.0,
     private val sharpMin: Double = 2.5,
 ) {
-    data class Detection(val start: Long, val strengthDb: Double, val sharp: Double)
+    /** revises=true: hemen önce bildirilen dizinin daha güçlü ölçümü (yeni olay değil). */
+    data class Detection(val start: Long, val strengthDb: Double, val sharp: Double, val revises: Boolean = false)
 
     private val fs = EnkazSignal.FS
     private val tpl = EnkazSignal.chirp(fs, up)
@@ -349,11 +350,6 @@ class PatternDetector(
             } else if (bestT >= 0 && dNext > clusterEnd) {
                 finish()
             }
-            val p = pending
-            if (p != null && dNext > p.start + suppressWin + fs / 2) {
-                out.add(p)
-                pending = null
-            }
             dNext++
         }
     }
@@ -387,18 +383,20 @@ class PatternDetector(
         offer(Detection(t, 20 * log10(d), sharp))
     }
 
-    // Bir dizi, bir saniye kaymış haliyle de (4 düdüğün 3'ü) eşleşir: yakındakilerden en güçlüsünü tut.
+    // Bir dizi, bir saniye kaymış haliyle de (4 düdüğün 3'ü) eşleşir. Hemen bildir; aynı pencerede
+    // daha güçlüsü gelirse onu "düzeltme" olarak bildir, zayıfını at.
     private val suppressWin = (count - 1).toLong() * period + fs / 2
-    private var pending: Detection? = null
+    private var lastEmitted: Detection? = null
 
     private fun offer(c: Detection) {
-        val p = pending
-        if (p == null) { pending = c; return }
-        if (kotlin.math.abs(c.start - p.start) <= suppressWin) {
-            if (c.strengthDb > p.strengthDb) pending = c
+        val p = lastEmitted
+        if (p != null && kotlin.math.abs(c.start - p.start) <= suppressWin) {
+            if (c.strengthDb > p.strengthDb) {
+                val r = c.copy(revises = true)
+                out.add(r); lastEmitted = r
+            }
         } else {
-            out.add(p)
-            pending = c
+            out.add(c); lastEmitted = c
         }
     }
 

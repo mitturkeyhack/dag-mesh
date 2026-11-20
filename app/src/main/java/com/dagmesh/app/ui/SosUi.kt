@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -504,10 +505,10 @@ fun FallAlertScreen(until: Long) {
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(32.dp))
-                Text("Düşme algılandı", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text("Sert bir sarsıntı oldu", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "İyi misin? Cevap vermezsen konumunla birlikte SOS yakındaki herkese gönderilecek.",
+                    "İyi misin? Cevap vermezsen SOS gidecek ve enkaz modu kendiliğinden açılacak.",
                     color = Color.White.copy(alpha = 0.8f),
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
@@ -535,12 +536,17 @@ fun FallAlertScreen(until: Long) {
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF15080A)),
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.fillMaxWidth().height(64.dp),
-                ) { Text("İyiyim, iptal et", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-                OutlinedButton(
+                ) { Text("✓ İyiyim", fontSize = 19.sp, fontWeight = FontWeight.Bold) }
+                Button(
                     onClick = { com.dagmesh.app.sos.FallDetector.sendNow() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF2935A), contentColor = Color(0xFF2B1406)),
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                ) { Text("Yardım lazım, hemen gönder", color = SosRed, fontWeight = FontWeight.SemiBold) }
+                ) {
+                    Icon(SeismoIcon, contentDescription = null, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Enkazdayım, şimdi aç", fontWeight = FontWeight.Bold)
+                }
             }
         }
     }

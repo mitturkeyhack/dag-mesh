@@ -71,7 +71,7 @@ class EnkazDspTest {
         add(x, EnkazSignal.pattern(fs, true, 0.3f), 4 * fs)
         val d = run(PatternDetector(true), x)
         assertTrue("bulunamadı: $d", near(d, 4 * fs))
-        assertEquals("tek dizi bir kez sayılmalı: $d", 1, d.size)
+        assertEquals("tek dizi bir kez sayılmalı: $d", 1, d.count { !it.revises })
     }
 
     @Test
@@ -158,7 +158,8 @@ class EnkazDspTest {
             val rnd = Random(12)
             val x = white(14 * fs, 0.05, rnd)
             add(x, EnkazSignal.pattern(fs, true, a), 5 * fs)
-            return run(PatternDetector(true), x).first { abs(it.start - 5 * fs) < fs / 20 }.strengthDb
+            val d = run(PatternDetector(true), x)
+            return d.filter { abs(it.start - 5 * fs) < fs / 20 }.maxOfOrNull { it.strengthDb } ?: error("bulunamadı: $d")
         }
         val weak = strength(ampForSnr(0.05, -6.0))
         val strong = strength(ampForSnr(0.05, 14.0))

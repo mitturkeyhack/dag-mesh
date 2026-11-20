@@ -53,6 +53,12 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
             }
         }
 
+        // Enkaz modu açıkken uygulama açılırsa doğrudan o ekrana git.
+        val enkaz by com.dagmesh.app.enkaz.EnkazMode.state.collectAsStateWithLifecycle()
+        LaunchedEffect(enkaz.active) {
+            if (enkaz.active && nav.currentDestination?.route != "enkaz") nav.navigate("enkaz") { launchSingleTop = true }
+        }
+
         Box(Modifier.fillMaxSize()) {
             NavHost(navController = nav, startDestination = "home") {
                 composable("home") {
@@ -63,8 +69,14 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
                     )
                 }
                 composable("afet") {
-                    AfetScreen(onBack = { nav.popBackStack() })
+                    AfetScreen(
+                        onBack = { nav.popBackStack() },
+                        onEnkaz = { nav.navigate("enkaz") { launchSingleTop = true } },
+                        onBulucu = { nav.navigate("bulucu") { launchSingleTop = true } },
+                    )
                 }
+                composable("enkaz") { EnkazScreen(onBack = { nav.popBackStack() }) }
+                composable("bulucu") { BulucuScreen(onBack = { nav.popBackStack() }) }
                 composable("aile") { FamilyScreen(onBack = { nav.popBackStack() }) }
                 composable("chat/{peerId}") { entry ->
                     ChatScreen(

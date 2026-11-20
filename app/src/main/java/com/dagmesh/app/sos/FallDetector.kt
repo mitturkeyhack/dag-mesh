@@ -30,12 +30,12 @@ import kotlin.math.sqrt
 
 /**
  * Düşme algılama: serbest düşüş → sert çarpma → hareketsizlik görülünce
- * 30 sn geri sayımlı uyarı açar. Kullanıcı "İyiyim" demezse SOS kendiliğinden gider.
+ * 60 sn geri sayımlı uyarı açar. Kullanıcı "İyiyim" demezse SOS gider ve enkaz modu açılır.
  * Uygulamanın arka plan hizmeti çalıştığı sürece (ekran kapalıyken de) çalışır.
  */
 object FallDetector : SensorEventListener {
 
-    const val COUNTDOWN_SEC = 30
+    const val COUNTDOWN_SEC = 60
 
     /** Geri sayım bitiş zamanı; null = uyarı yok. */
     private val _alertUntil = MutableStateFlow<Long?>(null)
@@ -146,6 +146,7 @@ object FallDetector : SensorEventListener {
             if (_alertUntil.value != null) {
                 finish()
                 app.mesh.sos.start()
+                com.dagmesh.app.enkaz.EnkazMode.start(ctx, auto = true)
             }
         }
     }
@@ -161,6 +162,7 @@ object FallDetector : SensorEventListener {
         countdown?.cancel()
         finish()
         App.instance.mesh.sos.start()
+        context?.let { com.dagmesh.app.enkaz.EnkazMode.start(it, auto = false) }
     }
 
     private fun finish() {

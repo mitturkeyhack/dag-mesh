@@ -121,7 +121,9 @@ object Bulucu {
             val end = f.start + (EnkazSignal.PATTERN_SEC * EnkazSignal.FS).toLong()
             if (ownFrom >= 0 && end >= ownFrom && f.start <= ownUntil) continue
             val at = now - (nowSamples - f.start) * 1000 / EnkazSignal.FS
-            _state.update { s ->
+            _state.update { s0 ->
+                // Aynı dizinin daha güçlü ölçümü: son kaydı güncelle.
+                val s = if (f.revises && s0.history.isNotEmpty()) s0.copy(history = s0.history.dropLast(1)) else s0
                 val prev = s.history.lastOrNull { at - it.at < 120_000 }
                 val trend = when {
                     prev == null -> Trend.FIRST

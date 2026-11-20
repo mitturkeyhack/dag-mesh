@@ -32,7 +32,8 @@ class MainActivity : ComponentActivity() {
                 kotlinx.coroutines.flow.combine(
                     App.instance.mesh.sos.incoming,
                     com.dagmesh.app.sos.FallDetector.alertUntil,
-                ) { map, fall -> map.values.any { !it.acknowledged } || fall != null }.collect { alarm ->
+                    com.dagmesh.app.enkaz.EnkazMode.state,
+                ) { map, fall, enkaz -> map.values.any { !it.acknowledged } || fall != null || enkaz.active }.collect { alarm ->
                     if (Build.VERSION.SDK_INT >= 27) {
                         setShowWhenLocked(alarm)
                         setTurnScreenOn(alarm)

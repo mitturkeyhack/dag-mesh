@@ -105,7 +105,7 @@ private fun Label(text: String, modifier: Modifier = Modifier) {
 /** Afet Merkezi: deprem anında tek ekran. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AfetScreen(onBack: () -> Unit) {
+fun AfetScreen(onBack: () -> Unit, onEnkaz: () -> Unit = {}, onBulucu: () -> Unit = {}) {
     val mesh = App.instance.mesh
     val internet by mesh.ai.internet.collectAsStateWithLifecycle()
     val share by mesh.ai.share.collectAsStateWithLifecycle()
@@ -179,6 +179,31 @@ fun AfetScreen(onBack: () -> Unit) {
                 }
             }
 
+            item(key = "l-enkaz") {
+                Row(Modifier.padding(start = 4.dp, top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("ENKAZ", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                    Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(50)) {
+                        Text("YENİ", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF2B1406), modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                    }
+                }
+            }
+            item(key = "enkaz") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    EnkazCard(
+                        color = MaterialTheme.colorScheme.primary, ink = Color(0xFF2B1406),
+                        icon = SeismoIcon, title = "Enkazdayım",
+                        sub = "Düdük çalar, titreşir, seslenmeye cevap verir",
+                        onClick = onEnkaz,
+                    )
+                    EnkazCard(
+                        color = StatusOk, ink = Color(0xFF062A24),
+                        icon = androidx.compose.material.icons.Icons.Rounded.Hearing, title = "Enkazda ara",
+                        sub = "Telefonu enkaza yasla, düdüğü bul",
+                        onClick = onBulucu,
+                    )
+                }
+            }
+
             item(key = "l-village") { Label("KÖY YOKLAMASI") }
             item(key = "village") { VillageCard(peers.keys, entries, mine) }
 
@@ -196,6 +221,29 @@ fun AfetScreen(onBack: () -> Unit) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EnkazCard(
+    color: Color,
+    ink: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    sub: String,
+    onClick: () -> Unit,
+) {
+    Surface(onClick = onClick, color = color, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(28.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(title, color = ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                Text(sub, color = ink.copy(alpha = 0.85f), style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = ink)
         }
     }
 }
