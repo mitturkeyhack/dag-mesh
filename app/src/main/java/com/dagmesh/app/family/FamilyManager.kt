@@ -266,6 +266,11 @@ class FamilyManager(
             val body = JSONObject().put("op", "put").put("fid", k.fid).put("ts", ts).put("id", id).put("ct", ct)
                 .put("mac", FamilyCrypto.mac(k, "put", ts, "$id\n$ct")).toString()
             val resp = mesh.net.call(body)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
+            if (resp.optString("error") == "no_family") {
+                // Sunucu aileyi tanımıyor (ör. sunucu sıfırlandı): bir sonraki turda yeniden kaydol.
+                lock.withLock { registered = false; save() }
+                return
+            }
             if (resp.optBoolean("ok")) {
                 lock.withLock {
                     outbox.remove(id)
