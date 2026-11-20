@@ -24,7 +24,7 @@ jobs:
       - name: APK derle
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew testReleaseUnitTest assembleRelease --stacktrace
 
       - name: APK'yı adlandır
         run: cp app/build/outputs/apk/release/app-release.apk "DagMesh-v0.1.${{ github.run_number }}.apk"

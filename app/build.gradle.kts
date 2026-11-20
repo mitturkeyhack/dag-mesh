@@ -105,4 +105,5 @@ dependencies {
 
     // Uçtan uca şifreleme: Ed25519 imza, X25519 anahtar değişimi, HKDF (Google Tink)
     implementation("com.google.crypto.tink:tink-android:1.15.0")
+    testImplementation("junit:junit:4.13.2")
 }
