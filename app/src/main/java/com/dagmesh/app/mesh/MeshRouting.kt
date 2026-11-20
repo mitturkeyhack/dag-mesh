@@ -35,15 +35,18 @@ class RouteTable(private val now: () -> Long = System::currentTimeMillis) {
         }
     }
 
-    /** En iyi yol ve (neredeyse aynı iyilikteyse) yedek yol; [exclude] bağlantısı hariç. */
+    /**
+     * En iyi yol ve [backup] ise (neredeyse aynı iyilikteki) yedek yol; [exclude] bağlantısı hariç.
+     * Yedek yolu sadece mesajı ilk gönderen kullanır: mesaj iki ayrı yola çıkar ama ağda çoğalmaz.
+     */
     @Synchronized
-    fun next(dest: String, maxAgeMs: Long, exclude: String? = null): List<Route> {
+    fun next(dest: String, maxAgeMs: Long, exclude: String? = null, backup: Boolean = true): List<Route> {
         val t = now()
         val fresh = routes[dest]?.filter { it.linkId != exclude && t - it.at <= maxAgeMs } ?: return emptyList()
         if (fresh.isEmpty()) return emptyList()
         val sorted = fresh.sortedWith(compareBy<Route> { it.hops }.thenByDescending { it.at })
         val best = sorted[0]
-        val second = sorted.getOrNull(1)?.takeIf { it.hops <= best.hops + 1 }
+        val second = if (backup) sorted.getOrNull(1)?.takeIf { it.hops <= best.hops + 1 } else null
         return listOfNotNull(best, second)
     }
 

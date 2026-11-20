@@ -486,7 +486,8 @@ class MeshManager(
             .groupBy { it.userId }.values.map { it.first() }
         // Kişiye özel paket: yol biliniyorsa sadece en iyi 1–2 komşuya (ağın geri kalanı yorulmaz).
         if (userId != null && !flood) {
-            val via = routes.next(userId, peerTimeoutMs, exclude = exceptLinkId)
+            // Yedek yol sadece mesajı ilk gönderen telefondan (ilerletilen pakette exceptLinkId dolu).
+            val via = routes.next(userId, peerTimeoutMs, exclude = exceptLinkId, backup = exceptLinkId == null)
                 .mapNotNull { r -> links[r.linkId]?.takeIf { it.verified && it.userId != exceptUser } }
                 .distinctBy { it.userId }
             if (via.isNotEmpty()) return via

@@ -159,7 +159,7 @@ class VillageSimTest {
                 val direct = b in links[u]
                 val targets = when {
                     direct -> listOf(b)
-                    else -> tables[u].next("p$b", Long.MAX_VALUE, exclude = "l$from").map { it.linkId.drop(1).toInt() }
+                    else -> tables[u].next("p$b", Long.MAX_VALUE, exclude = "l$from", backup = u == a).map { it.linkId.drop(1).toInt() }
                         .ifEmpty { links[u].filter { it != from } }
                 }
                 for (w in targets) {
@@ -178,7 +178,7 @@ class VillageSimTest {
         val avgPath = pathSum.toDouble() / tried
         println("Köy simülasyonu: ortalama yol $avgPath atlama, yol hafızasıyla $avgRouted gönderim, eski yöntemle $avgFlood gönderim")
         assertTrue("yol hafızası yükü azaltmalı: $avgRouted / $avgFlood", avgRouted * 10 <= avgFlood)
-        assertTrue("gönderim yol uzunluğuyla orantılı kalmalı: $avgRouted / $avgPath", avgRouted <= avgPath * 4 + 4)
+        assertTrue("gönderim yol uzunluğuyla orantılı kalmalı: $avgRouted / $avgPath", avgRouted <= avgPath * 2.5 + 4)
     }
 
     @Test
@@ -227,6 +227,7 @@ class VillageSimTest {
         r.learn("x", "b", 3)
         r.learn("x", "c", 4)
         assertEquals(listOf("b", "c"), r.next("x", 60_000).map { it.linkId })
+        assertEquals(listOf("b"), r.next("x", 60_000, backup = false).map { it.linkId })
         assertEquals(listOf("c", "a"), r.next("x", 60_000, exclude = "b").map { it.linkId })
         t = 120_000
         r.learn("x", "a", 6)
