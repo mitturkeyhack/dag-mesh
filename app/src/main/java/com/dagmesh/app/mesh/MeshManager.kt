@@ -497,8 +497,8 @@ class MeshManager(
     private fun sendTo(
         targets: List<Link>,
         bytes: ByteArray,
-        onResult: ((Boolean) -> Unit)? = null,
         priority: Int = SendPriority.NORMAL,
+        onResult: ((Boolean) -> Unit)? = null,
     ) {
         targets.groupBy { it.transport }.forEach { (transport, list) ->
             val ids = list.map { it.linkId }
@@ -550,7 +550,7 @@ class MeshManager(
         if (targets.isEmpty()) return false
         val bytes = encode(packet) ?: return false
         remember(packet.pid)
-        sendTo(targets, bytes, onResult, SendPriority.of(packet.type))
+        sendTo(targets, bytes, SendPriority.of(packet.type), onResult)
         return true
     }
 
