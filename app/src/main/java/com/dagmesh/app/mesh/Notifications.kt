@@ -13,7 +13,9 @@ import com.dagmesh.app.MainActivity
 import com.dagmesh.app.R
 
 object Notifications {
-    private const val CHANNEL_STATUS = "mesh_status"
+    private const val OLD_CHANNEL_STATUS = "mesh_status"
+    // Kilit ekranında da görünsün diye ayrı (sessiz ama "varsayılan" önemde) kanal.
+    private const val CHANNEL_STATUS = "afet_durum"
     private const val CHANNEL_MESSAGES = "messages"
     private const val CHANNEL_CALLS = "calls"
     const val STATUS_ID = 1
@@ -22,8 +24,15 @@ object Notifications {
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         val manager = context.getSystemService(NotificationManager::class.java)
+        manager.deleteNotificationChannel(OLD_CHANNEL_STATUS)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_STATUS, "Ağ durumu", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_STATUS, "Ağ durumu ve afet düğmeleri", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Kilit ekranında Afet Merkezi ve Güvendeyim düğmeleri"
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
         )
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_MESSAGES, "Mesajlar", NotificationManager.IMPORTANCE_HIGH)
@@ -43,18 +52,39 @@ object Notifications {
             total == direct -> "$direct kişiye doğrudan bağlı"
             else -> "$direct doğrudan · ${total - direct} zincirle ulaşılabilir"
         }
+        val mine = runCatching { com.dagmesh.app.App.instance.mesh.village.mine.value }.getOrNull()
+        val safeNote = mine?.takeIf { it.status == "ok" }?.let {
+            " · ✓ Güvendeyim " + java.text.SimpleDateFormat("HH:mm", java.util.Locale("tr")).format(java.util.Date(it.at))
+        }.orEmpty()
         val stopIntent = PendingIntent.getService(
             context, 1,
             Intent(context, MeshService::class.java).setAction(MeshService.ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        // Kilit açılmadan çalışır: köye ve aileye "iyiyim" gider.
+        val safeIntent = PendingIntent.getService(
+            context, 4,
+            Intent(context, MeshService::class.java).setAction(com.dagmesh.app.QuickActions.ACTION_SAFE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val afetIntent = PendingIntent.getActivity(
+            context, 5,
+            Intent(context, MainActivity::class.java)
+                .setAction(com.dagmesh.app.QuickActions.ACTION_AFET)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(R.drawable.ic_stat_mesh)
             .setContentTitle("Dağ Mesh açık")
-            .setContentText(text)
+            .setContentText(text + safeNote)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(openApp(context, null))
+            .addAction(R.drawable.ic_seismo, "Afet Merkezi", afetIntent)
+            .addAction(0, "✓ Güvendeyim", safeIntent)
             .addAction(0, "Durdur", stopIntent)
             .build()
     }

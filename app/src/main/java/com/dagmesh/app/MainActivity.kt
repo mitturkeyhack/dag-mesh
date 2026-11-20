@@ -23,6 +23,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         openPeer.value = intent?.getStringExtra(EXTRA_PEER_ID)
+        // Döndürme gibi yeniden oluşturmalarda kısayolu ikinci kez çalıştırma.
+        if (savedInstanceState == null) handleQuickAction(intent)
 
         // Kilit ekranının üstünde sadece cevaplanmamış bir acil durum varken açıl; mesajlar kilitte görünmesin.
         lifecycleScope.launch {
@@ -54,9 +56,29 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_PEER_ID)?.let { openPeer.value = it }
+        handleQuickAction(intent)
+    }
+
+    /** Ana ekran kısayolları ve bildirimdeki "Afet Merkezi" düğmesi. */
+    private fun handleQuickAction(intent: Intent?) {
+        when (intent?.action) {
+            QuickActions.ACTION_AFET -> openPeer.value = ROUTE_AFET
+            QuickActions.ACTION_SAFE -> {
+                QuickActions.markSafe(this)
+                openPeer.value = ROUTE_AFET
+            }
+            QuickActions.ACTION_SOS -> {
+                QuickActions.sosRequest.value = true
+                openPeer.value = ROUTE_AFET
+            }
+            else -> return
+        }
+        // Aynı niyet tekrar işlenmesin.
+        setIntent(Intent(intent).setAction(Intent.ACTION_MAIN))
     }
 
     companion object {
         const val EXTRA_PEER_ID = "peerId"
+        const val ROUTE_AFET = "#afet"
     }
 }

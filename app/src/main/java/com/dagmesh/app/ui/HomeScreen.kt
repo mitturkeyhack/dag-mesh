@@ -234,8 +234,6 @@ fun HomeScreen(onOpenChat: (String) -> Unit, onOpenAfet: () -> Unit = {}, onOpen
                 },
                 actions = {
                     if (tab == Tab.RADAR || tab == Tab.CHATS) {
-                        AfetChip(onOpenAfet)
-                        Spacer(Modifier.width(8.dp))
                         PowerModeChip(powerMode) { showPower = true }
                         Spacer(Modifier.width(8.dp))
                         NetworkToggle(running) { toggleNetwork() }
@@ -265,7 +263,9 @@ fun HomeScreen(onOpenChat: (String) -> Unit, onOpenAfet: () -> Unit = {}, onOpen
                 if (out != null) {
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { SosBanner(out) { showSosSheet = true } }
                 }
-                val inner = PaddingValues(bottom = padding.calculateBottomPadding() + 16.dp)
+                // Radar'da yüzen Afet düğmesi son satırı örtmesin.
+                val fabSpace = if (tab == Tab.RADAR) 80.dp else 0.dp
+                val inner = PaddingValues(bottom = padding.calculateBottomPadding() + 16.dp + fabSpace)
                 Box(Modifier.weight(1f)) {
                     when (tab) {
                         Tab.RADAR -> RadarTab(
@@ -304,6 +304,18 @@ fun HomeScreen(onOpenChat: (String) -> Unit, onOpenAfet: () -> Unit = {}, onOpen
                         )
                     }
                 }
+            }
+
+            // Afet Merkezi: sağ altta, alt menünün hemen üstünde yüzen düğme.
+            AnimatedVisibility(
+                visible = tab == Tab.RADAR && holdProgress == 0f && !showHint,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = padding.calculateBottomPadding() + 16.dp),
+            ) {
+                AfetFab(onClick = onOpenAfet)
             }
 
             // SOS ipucu: basılı tutarken geri sayım, kısa dokunuşta açıklama.

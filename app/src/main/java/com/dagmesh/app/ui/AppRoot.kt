@@ -43,7 +43,11 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
         // Bildirime dokunulunca ilgili sohbeti aç
         LaunchedEffect(openPeerId) {
             if (openPeerId != null) {
-                val route = if (openPeerId == com.dagmesh.app.family.FamilyManager.NOTIFY_PEER) "aile" else "chat/$openPeerId"
+                val route = when (openPeerId) {
+                    com.dagmesh.app.family.FamilyManager.NOTIFY_PEER -> "aile"
+                    com.dagmesh.app.MainActivity.ROUTE_AFET -> "afet"
+                    else -> "chat/$openPeerId"
+                }
                 nav.navigate(route) { launchSingleTop = true }
                 onPeerOpened()
             }

@@ -21,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -117,8 +116,31 @@ fun AfetScreen(onBack: () -> Unit, onOpenFamily: () -> Unit) {
     val familyInfo by mesh.family.info.collectAsStateWithLifecycle()
     val members by mesh.family.members.collectAsStateWithLifecycle()
     var showShare by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sosRequest by com.dagmesh.app.QuickActions.sosRequest.collectAsStateWithLifecycle()
+    val sosOutgoing by mesh.sos.outgoing.collectAsStateWithLifecycle()
+
+    // Kısayoldan doğrudan buraya gelindiyse ağ henüz açılmamış olabilir.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (!mesh.running.value && com.dagmesh.app.Permissions.hasCore(context)) {
+            com.dagmesh.app.mesh.MeshService.start(context)
+        }
+    }
 
     if (showShare) ShareSheet(onDismiss = { showShare = false })
+    if (sosRequest) {
+        if (sosOutgoing != null) {
+            com.dagmesh.app.QuickActions.sosRequest.value = false
+        } else {
+            SosCountdownDialog(
+                onSend = {
+                    com.dagmesh.app.QuickActions.sosRequest.value = false
+                    mesh.sos.start()
+                },
+                onCancel = { com.dagmesh.app.QuickActions.sosRequest.value = false },
+            )
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -368,7 +390,7 @@ private fun ShareCard(onClick: () -> Unit) {
 fun AfetChip(onClick: () -> Unit) {
     Surface(onClick = onClick, color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(50), modifier = Modifier.height(40.dp)) {
         Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Icons.Rounded.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
+            Icon(SeismoIcon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
             Text("Afet", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
             Spacer(Modifier.size(0.dp))
         }

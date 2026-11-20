@@ -44,6 +44,13 @@ class MeshService : Service() {
                 mesh.calls.reject()
                 if (mesh.running.value) return START_STICKY
             }
+            com.dagmesh.app.QuickActions.ACTION_SAFE -> {
+                com.dagmesh.app.QuickActions.markSafe(this)
+                if (mesh.running.value) {
+                    refreshStatus()
+                    return START_STICKY
+                }
+            }
         }
 
         if (!goForeground(callActive = mesh.calls.state.value is CallState.Active)) {
@@ -56,7 +63,7 @@ class MeshService : Service() {
         if (!collecting) {
             collecting = true
             scope.launch {
-                mesh.peers.collect { peers ->
+                kotlinx.coroutines.flow.combine(mesh.peers, mesh.village.mine) { peers, _ -> peers }.collect { peers ->
                     Notifications.updateStatus(this@MeshService, peers.values.count { it.isDirect }, peers.size)
                 }
             }
@@ -85,6 +92,11 @@ class MeshService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    private fun refreshStatus() {
+        val peers = mesh.peers.value
+        Notifications.updateStatus(this, peers.values.count { it.isDirect }, peers.size)
     }
 
     private fun goForeground(callActive: Boolean, minimal: Boolean = false): Boolean = try {

@@ -43,6 +43,7 @@ class App : Application(), ImageLoaderFactory {
         com.dagmesh.app.map.OfflineMap.init(this)
         com.dagmesh.app.sos.FallDetector.init(this)
         com.dagmesh.app.map.PinStore.init(this, mesh, scope)
+        QuickActions.publishShortcuts(this)
     }
 
     /** Fotoğraf ve video küçük resimleri için görsel yükleyici. */
