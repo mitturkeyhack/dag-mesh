@@ -278,7 +278,7 @@ private fun HoldToStop(modifier: Modifier, onStop: () -> Unit) {
                     val start = System.currentTimeMillis()
                     var done = false
                     while (true) {
-                        val up = kotlinx.coroutines.withTimeoutOrNull(16) { waitForUpOrCancellation(); true }
+                        val up = withTimeoutOrNull(16) { waitForUpOrCancellation(); true }
                         progress = ((System.currentTimeMillis() - start) / 2000f).coerceAtMost(1f)
                         if (!done && progress >= 1f) { done = true; onStop() }
                         if (up == true) break
@@ -408,12 +408,12 @@ fun BulucuScreen(onBack: () -> Unit) {
                 Surface(
                     onClick = { scope.launch { markHere(context, last.percent, alert = false) } },
                     color = Orange, shape = RoundedCornerShape(50), modifier = Modifier.weight(1f).height(56.dp),
-                ) { Box(contentAlignment = Alignment.Center) { Text("Buraya işaret koy", color = OrangeInk, fontWeight = FontWeight.ExtraBold) } }
+                ) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Buraya işaret koy", color = OrangeInk, fontWeight = FontWeight.ExtraBold) } }
                 Surface(
                     onClick = { scope.launch { markHere(context, last.percent, alert = true) } },
                     color = Color.Transparent, border = BorderStroke(1.5.dp, Teal), shape = RoundedCornerShape(50),
                     modifier = Modifier.weight(1f).height(56.dp),
-                ) { Box(contentAlignment = Alignment.Center) { Text("Herkese haber ver", color = Teal, fontWeight = FontWeight.Bold) } }
+                ) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Herkese haber ver", color = Teal, fontWeight = FontWeight.Bold) } }
             }
             Text(
                 "İşaret haritaya düşer ve mesh ile yakındaki herkese gider.",
@@ -432,7 +432,7 @@ fun BulucuScreen(onBack: () -> Unit) {
                 color = Teal, shape = RoundedCornerShape(50),
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp).fillMaxWidth().height(58.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Campaign, contentDescription = null, tint = TealInk)
                     Spacer(Modifier.width(10.dp))
                     Text(

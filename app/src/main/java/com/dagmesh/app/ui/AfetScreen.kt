@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -127,6 +128,21 @@ fun AfetScreen(onBack: () -> Unit, onEnkaz: () -> Unit = {}, onBulucu: () -> Uni
     }
 
     if (showShare) ShareSheet(onDismiss = { showShare = false })
+    var confirmEnkaz by remember { mutableStateOf(false) }
+    if (confirmEnkaz) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmEnkaz = false },
+            title = { Text("Enkaz modu açılsın mı?", fontWeight = FontWeight.Bold) },
+            text = { Text("Telefon düdük çalıp titreşecek ve yakındaki herkese konumunla SOS gidecek.") },
+            confirmButton = {
+                androidx.compose.material3.Button(
+                    onClick = { confirmEnkaz = false; onEnkaz() },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = Color(0xFF2B1406)),
+                ) { Text("Aç", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { confirmEnkaz = false }) { Text("Vazgeç") } },
+        )
+    }
     if (sosRequest) {
         if (sosOutgoing != null) {
             com.dagmesh.app.QuickActions.sosRequest.value = false
@@ -193,11 +209,11 @@ fun AfetScreen(onBack: () -> Unit, onEnkaz: () -> Unit = {}, onBulucu: () -> Uni
                         color = MaterialTheme.colorScheme.primary, ink = Color(0xFF2B1406),
                         icon = SeismoIcon, title = "Enkazdayım",
                         sub = "Düdük çalar, titreşir, seslenmeye cevap verir",
-                        onClick = onEnkaz,
+                        onClick = { if (com.dagmesh.app.enkaz.EnkazMode.state.value.active) onEnkaz() else confirmEnkaz = true },
                     )
                     EnkazCard(
                         color = StatusOk, ink = Color(0xFF062A24),
-                        icon = androidx.compose.material.icons.Icons.Rounded.Hearing, title = "Enkazda ara",
+                        icon = Icons.Rounded.Hearing, title = "Enkazda ara",
                         sub = "Telefonu enkaza yasla, düdüğü bul",
                         onClick = onBulucu,
                     )
