@@ -105,7 +105,7 @@ private fun Label(text: String, modifier: Modifier = Modifier) {
 /** Afet Merkezi: deprem anında tek ekran. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AfetScreen(onBack: () -> Unit, onOpenFamily: () -> Unit) {
+fun AfetScreen(onBack: () -> Unit) {
     val mesh = App.instance.mesh
     val internet by mesh.ai.internet.collectAsStateWithLifecycle()
     val share by mesh.ai.share.collectAsStateWithLifecycle()
@@ -114,7 +114,6 @@ fun AfetScreen(onBack: () -> Unit, onOpenFamily: () -> Unit) {
     val mine by mesh.village.mine.collectAsStateWithLifecycle()
     val entries by mesh.village.entries.collectAsStateWithLifecycle()
     val familyInfo by mesh.family.info.collectAsStateWithLifecycle()
-    val members by mesh.family.members.collectAsStateWithLifecycle()
     var showShare by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val sosRequest by com.dagmesh.app.QuickActions.sosRequest.collectAsStateWithLifecycle()
@@ -179,16 +178,6 @@ fun AfetScreen(onBack: () -> Unit, onOpenFamily: () -> Unit) {
                     )
                 }
             }
-
-            item(key = "l-family") {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Label("AİLEM", Modifier.weight(1f))
-                    if (familyInfo != null) {
-                        TextButton(onClick = onOpenFamily) { Text("Aile sohbeti") }
-                    }
-                }
-            }
-            item(key = "family") { FamilyMiniCard(familyInfo != null, members.filter { !it.isMe }, onOpenFamily) }
 
             item(key = "l-village") { Label("KÖY YOKLAMASI") }
             item(key = "village") { VillageCard(peers.keys, entries, mine) }
@@ -267,56 +256,6 @@ private fun StatusButtons(selected: String?, onPick: (String) -> Unit) {
                     Column {
                         Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ink)
                         Text(hint, style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.85f))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FamilyMiniCard(hasFamily: Boolean, members: List<FamilyManager.Member>, onOpen: () -> Unit) {
-    Surface(
-        onClick = onOpen,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        if (!hasFamily || members.isEmpty()) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (hasFamily) "Henüz kimse katılmadı" else "Aileni kur", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        if (hasFamily) "Aile kodunu ailenle paylaş" else "Uzaktaki ailen bile senden haber alsın",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null)
-            }
-        } else {
-            Column {
-                members.forEachIndexed { i, m ->
-                    if (i > 0) HorizontalDivider(Modifier.padding(start = 40.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                    Row(
-                        Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        StatusDot(m.status)
-                        Column {
-                            Text(m.name, style = MaterialTheme.typography.titleSmall)
-                            val line = if (m.status != null) {
-                                FamilyManager.statusLabel(m.status) + " · " + agoText(m.statusAt) + " · " + viaText(m.via)
-                            } else {
-                                "Durum bildirmedi · son görülme " + agoText(m.lastSeen)
-                            }
-                            Text(
-                                line,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (m.status == null) StatusHurt else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
                     }
                 }
             }

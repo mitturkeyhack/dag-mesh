@@ -63,10 +63,7 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
                     )
                 }
                 composable("afet") {
-                    AfetScreen(
-                        onBack = { nav.popBackStack() },
-                        onOpenFamily = { nav.navigate("aile") { launchSingleTop = true } },
-                    )
+                    AfetScreen(onBack = { nav.popBackStack() })
                 }
                 composable("aile") { FamilyScreen(onBack = { nav.popBackStack() }) }
                 composable("chat/{peerId}") { entry ->
