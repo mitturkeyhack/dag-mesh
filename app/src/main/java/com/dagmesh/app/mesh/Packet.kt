@@ -52,6 +52,8 @@ data class Packet(
     val keyCert: String? = null,
     /** Protokol sürümü. 3 = şifreli / imzalı; daha eskisi kabul edilmez. */
     val version: Int = PROTOCOL_VERSION,
+    /** Yol hafızasını kullanma, herkese yay (yeniden denemelerde: yol bozulmuş olabilir). */
+    val flood: Boolean = false,
 ) {
     val isSealed: Boolean get() = sealed != null || sig != null
 
@@ -78,6 +80,7 @@ data class Packet(
         sealed?.let { o.put("ct", it) }
         sig?.let { o.put("sg", it) }
         keyCert?.let { o.put("kc", it) }
+        if (flood) o.put("fl", 1)
         media?.let { m ->
             o.put("k", m.kind)
             o.put("fn", m.name)
@@ -130,8 +133,12 @@ data class Packet(
 
         const val PROTOCOL_VERSION = 3
 
-        const val DEFAULT_TTL = 6
-        const val ANNOUNCE_TTL = 4
+        /**
+         * Seyrek bir köyde iki uç arası 30 atlamayı bulabiliyor (köy simülasyonu). Ömür yükü artırmaz:
+         * her telefon bir paketi yalnızca bir kez iletir; kişiye özel paketler yol hafızasıyla gider.
+         */
+        const val DEFAULT_TTL = 32
+        const val ANNOUNCE_TTL = 32
 
         private const val BINARY_MAGIC: Byte = 0x01
 
@@ -190,6 +197,7 @@ data class Packet(
                 sig = o.stringOrNull("sg"),
                 keyCert = o.stringOrNull("kc"),
                 version = o.optInt("v", 1),
+                flood = o.optInt("fl", 0) == 1,
             )
         }
 

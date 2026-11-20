@@ -345,7 +345,7 @@ class AiBridge(
 
     /** MeshManager'ın zamanlayıcısından 30 sn'de bir çağrılır. */
     fun tick() {
-        val cutoff = System.currentTimeMillis() - GATEWAY_TIMEOUT_MS
+        val cutoff = System.currentTimeMillis() - mesh.peerTimeoutMs
         _gateways.update { map -> map.filterValues { it >= cutoff } }
         flush()
     }
@@ -365,7 +365,7 @@ class AiBridge(
     // ---------------------------------------------------------------- yardımcılar
 
     private fun bestGateway(gateways: Map<String, Long>, peers: Map<String, MeshManager.Peer>): String? {
-        val cutoff = System.currentTimeMillis() - GATEWAY_TIMEOUT_MS
+        val cutoff = System.currentTimeMillis() - mesh.peerTimeoutMs
         val alive = gateways.filter { (id, seen) -> seen >= cutoff && id != mesh.myId }
         if (alive.isEmpty()) return null
         return alive.keys.minWithOrNull(

@@ -96,7 +96,7 @@ class NetBridge(
     }
 
     fun tick() {
-        val cutoff = System.currentTimeMillis() - GATEWAY_TIMEOUT_MS
+        val cutoff = System.currentTimeMillis() - mesh.peerTimeoutMs
         gateways.update { map -> map.filterValues { it >= cutoff } }
     }
 
@@ -120,7 +120,7 @@ class NetBridge(
     }
 
     private fun bestGateway(gw: Map<String, Long>, peers: Map<String, MeshManager.Peer>): String? {
-        val cutoff = System.currentTimeMillis() - GATEWAY_TIMEOUT_MS
+        val cutoff = System.currentTimeMillis() - mesh.peerTimeoutMs
         val alive = gw.filter { (id, seen) -> seen >= cutoff && id != mesh.myId }
         return alive.keys.minWithOrNull(compareBy<String>({ peers[it]?.hops ?: 99 }, { -(alive[it] ?: 0L) }))
     }

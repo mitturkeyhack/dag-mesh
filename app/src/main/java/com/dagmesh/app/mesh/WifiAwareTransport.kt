@@ -316,7 +316,7 @@ class WifiAwareTransport(
      */
     private fun maybeInitiate(userId: String) {
         if (!running) return
-        if (listener.isConnected(userId) || hasLink(userId)) return
+        if (!listener.shouldConnect(userId) || hasLink(userId)) return
         val seenFor = System.currentTimeMillis() - (firstSeen[userId] ?: System.currentTimeMillis())
         if (identity.userId > userId && seenFor < FALLBACK_INITIATE_MS) return
         val handle = discovered[userId] ?: return
@@ -339,7 +339,7 @@ class WifiAwareTransport(
         val text = String(message, Charsets.UTF_8)
         if (!text.startsWith("$HELLO|")) return
         val (userId, _) = parseIdentity(text.removePrefix("$HELLO|")) ?: return
-        if (listener.isConnected(userId) || hasLink(userId)) return
+        if (listener.isConnected(userId) || hasLink(userId) || !listener.hasRoomFor(userId)) return
         val pub = publishSession ?: return
 
         scope.launch(Dispatchers.IO) {

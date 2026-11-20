@@ -132,7 +132,7 @@ class NearbyTransport(
 
     private fun requestIfNeeded(endpointId: String, userId: String) {
         if (!running) return
-        if (connected.containsKey(endpointId) || listener.isConnected(userId)) return
+        if (connected.containsKey(endpointId) || !listener.shouldConnect(userId)) return
         if (!requested.add(endpointId)) return
         client.requestConnection(myEndpointName, endpointId, lifecycleCallback)
             .addOnFailureListener {
@@ -162,6 +162,13 @@ class NearbyTransport(
 
     private val lifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            // Kalabalıkta komşu sınırı doluysa yeni bağlantıyı geri çevir (başka yoldan ulaşılamayanlar hariç).
+            val uid = parseIdentity(info.endpointName)?.first
+            if (uid != null && !listener.hasRoomFor(uid)) {
+                client.rejectConnection(endpointId)
+                requested.remove(endpointId)
+                return
+            }
             initiatedNames[endpointId] = info.endpointName
             client.acceptConnection(endpointId, payloadCallback)
                 .addOnFailureListener { Log.d(TAG, "Bağlantı kabul edilemedi", it) }

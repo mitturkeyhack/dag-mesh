@@ -119,6 +119,18 @@ class MeshManager(
     }
     private var tickerJob: Job? = null
 
+    /** Yol hafızası: kime hangi komşu üzerinden ulaşılır (kalabalık ağ). */
+    private val routes = RouteTable()
+    /** Öncelikli gönderim: hat dolunca SOS önce. */
+    private val sendQueue = SendQueue(maxInFlight = 6)
+    private var lastAnnounceAt = 0L
+    private var firstLinkAt = 0L
+    /** Kişi başı yeniden deneme: mesaj kimliği → (deneme sayısı, son deneme). */
+    private val retries = ConcurrentHashMap<String, Pair<Int, Long>>()
+
+    /** Kişi listesi ve köprü bilgisinin ömrü: ağ büyüdükçe duyurular seyrekleşir, ömür uzar. */
+    val peerTimeoutMs: Long get() = AnnouncePolicy.timeoutMs(_peers.value.size)
+
     /** Uçtan uca şifreleme ve imza. */
     val crypto = MeshCrypto(appContext, identity.vault)
 
@@ -166,11 +178,15 @@ class MeshManager(
                 transports.forEach { it.tick() }
                 expirePeers()
                 checkLinks()
+                // Duyuru sıklığı ağın büyüklüğüne göre (30–80 sn)
+                val now = System.currentTimeMillis()
+                if (now - lastAnnounceAt >= AnnouncePolicy.intervalMs(_peers.value.size) - TICK_MS / 2) announce()
                 if (tick % ANNOUNCE_EVERY_TICKS == 0) {
-                    announce()
                     ai.tick()
                     net.tick()
                     village.tick()
+                    retryUndelivered()
+                    routes.prune(peerTimeoutMs)
                 }
             }
         }
@@ -191,6 +207,7 @@ class MeshManager(
         calls.hangup()
         transports.forEach { it.stop() }
         links.clear()
+        firstLinkAt = 0L
         _peers.value = emptyMap()
         _outdatedNearby.value = 0
     }
@@ -203,6 +220,18 @@ class MeshManager(
     override fun isConnected(userId: String): Boolean =
         isBlocked(userId) || links.values.any { it.userId == userId && it.verified }
 
+    override fun shouldConnect(userId: String): Boolean = !isConnected(userId) && hasRoomFor(userId)
+
+    override fun hasRoomFor(userId: String): Boolean {
+        if (links.values.any { it.userId == userId }) return true // zaten bağlantı kuruluyor
+        val count = links.values.map { it.userId }.toSet().size
+        val now = System.currentTimeMillis()
+        val peer = _peers.value[userId]
+        val reachable = peer != null && now - peer.lastSeen < peerTimeoutMs
+        val settled = firstLinkAt > 0 && now - firstLinkAt > LinkPolicy.SETTLE_MS
+        return LinkPolicy.allows(count, reachable, settled)
+    }
+
     override fun onLinkUp(transport: Transport, linkId: String, userId: String, userName: String) {
         if (isConnected(userId)) {
             // Bu kişiye başka bir kanaldan zaten (doğrulanmış) bağlıyız ya da eski sürüm: kapat.
@@ -211,6 +240,7 @@ class MeshManager(
         }
         // Henüz doğrulanmadı: kişi listesine ve yönlendirmeye ancak imzalı duyurusu gelince girer.
         links[linkId] = Link(linkId, userId, userName, transport)
+        if (firstLinkAt == 0L) firstLinkAt = System.currentTimeMillis()
         if (_error.value != null && transport.state.value == TransportState.ACTIVE) _error.value = null
         scope.launch { announce() }
     }
@@ -250,6 +280,7 @@ class MeshManager(
     private fun isBlocked(userId: String): Boolean = (blocked[userId] ?: 0L) > System.currentTimeMillis()
 
     override fun onLinkDown(linkId: String) {
+        routes.dropLink(linkId)
         val link = links.remove(linkId) ?: return
         val replacement = links.values.firstOrNull { it.userId == link.userId && it.verified }
         _peers.update { map ->
@@ -373,7 +404,7 @@ class MeshManager(
     }
 
     /** Mesajı ağa verir. Her denemede yeni paket kimliği alır, böylece yeniden gönderim zincirde engellenmez. */
-    private fun transmit(message: MessageEntity) {
+    private fun transmit(message: MessageEntity, flood: Boolean = false) {
         if (message.peerId == AiBridge.PEER_ID) {
             ai.transmit(message)
             return
@@ -382,7 +413,7 @@ class MeshManager(
             media.send(message)
             return
         }
-        val targets = route(message.peerId)
+        val targets = route(message.peerId, flood = flood)
         if (targets.isEmpty()) return // kimse yok: mesaj sırada bekler
         val packet = newPacket(Packet.TYPE_MSG, to = message.peerId, ref = message.id, text = message.text)
             .copy(
@@ -391,12 +422,35 @@ class MeshManager(
                 replyTo = message.replyToId,
                 replyText = message.replyText,
                 replyAuthor = message.replyAuthor,
+                flood = flood,
             )
         // Alıcının anahtarı henüz bilinmiyorsa mesaj sırada bekler; anahtar öğrenilince gider.
         val bytes = encode(packet) ?: return
         remember(packet.pid)
-        sendTo(targets, bytes) { ok ->
+        retries.compute(message.id) { _, old -> ((old?.first ?: 0) + 1) to System.currentTimeMillis() }
+        sendTo(targets, bytes, priority = SendPriority.HIGH) { ok ->
             if (ok) scope.launch { dao.updateStatus(message.id, MessageEntity.STATUS_SENT) }
+        }
+    }
+
+    /**
+     * Ulaştığı onaylanmamış yazılı mesajları yeniden dene. İlk deneme yol hafızasıyla gider;
+     * onay gelmezse sonrakiler herkese yayılır (yol bozulmuş olabilir). Aralık giderek uzar.
+     */
+    private fun retryUndelivered() {
+        if (links.values.none { it.verified }) return
+        scope.launch {
+            val now = System.currentTimeMillis()
+            for (m in dao.unconfirmed(now - RESEND_WINDOW_MS)) {
+                if (m.isMedia || m.peerId == AiBridge.PEER_ID) continue
+                // Alıcı şu an ağda görünmüyorsa boşuna yayma; göründüğünde (bağlantı/anahtar) zaten gönderilir.
+                if (_peers.value[m.peerId] == null) continue
+                val (count, last) = retries[m.id] ?: (0 to m.timestamp)
+                val wait = RETRY_STEPS_MS[(count - 1).coerceIn(0, RETRY_STEPS_MS.size - 1)]
+                if (now - last < wait) continue
+                transmit(m, flood = count >= 1)
+                delay(80)
+            }
         }
     }
 
@@ -423,25 +477,51 @@ class MeshManager(
      * Alıcı doğrudan bağlıysa sadece ona, değilse tüm komşulara (kişi başına tek kanal).
      * Sadece kimliğini kanıtlamış bağlantılar kullanılır.
      */
-    private fun route(userId: String?): List<Link> {
+    private fun route(userId: String?, exceptLinkId: String? = null, flood: Boolean = false): List<Link> {
+        val exceptUser = exceptLinkId?.let { links[it]?.userId }
         val directId = userId?.let { _peers.value[it]?.linkId }
-        val direct = directId?.let { links[it] }?.takeIf { it.verified }
+        val direct = directId?.let { links[it] }?.takeIf { it.verified && it.linkId != exceptLinkId }
         if (direct != null) return listOf(direct)
-        return links.values.filter { it.verified }.groupBy { it.userId }.values.map { it.first() }
+        val all = links.values.filter { it.verified && it.linkId != exceptLinkId && it.userId != exceptUser }
+            .groupBy { it.userId }.values.map { it.first() }
+        // Kişiye özel paket: yol biliniyorsa sadece en iyi 1–2 komşuya (ağın geri kalanı yorulmaz).
+        if (userId != null && !flood) {
+            val via = routes.next(userId, peerTimeoutMs, exclude = exceptLinkId)
+                .mapNotNull { r -> links[r.linkId]?.takeIf { it.verified && it.userId != exceptUser } }
+                .distinctBy { it.userId }
+            if (via.isNotEmpty()) return via
+        }
+        return all
     }
 
-    private fun sendTo(targets: List<Link>, bytes: ByteArray, onResult: ((Boolean) -> Unit)? = null) {
+    private fun sendTo(
+        targets: List<Link>,
+        bytes: ByteArray,
+        onResult: ((Boolean) -> Unit)? = null,
+        priority: Int = SendPriority.NORMAL,
+    ) {
         targets.groupBy { it.transport }.forEach { (transport, list) ->
-            transport.send(list.map { it.linkId }, bytes, onResult)
+            val ids = list.map { it.linkId }
+            sendQueue.submit(priority) { done ->
+                val finished = AtomicBoolean(false)
+                val finish = { ok: Boolean ->
+                    if (finished.compareAndSet(false, true)) {
+                        done()
+                        onResult?.invoke(ok)
+                    }
+                }
+                // Kanal cevap vermezse sıra tıkanmasın.
+                scope.launch { delay(SEND_TIMEOUT_MS); finish(false) }
+                transport.send(ids, bytes) { ok -> finish(ok) }
+            }
         }
     }
 
     private fun sendPacket(packet: Packet, exceptLinkId: String? = null) {
-        val exceptUser = exceptLinkId?.let { links[it]?.userId }
-        val targets = route(packet.to).filter { it.linkId != exceptLinkId && it.userId != exceptUser }
+        val targets = route(packet.to, exceptLinkId, packet.flood)
         if (targets.isEmpty()) return
         val bytes = encode(packet) ?: return
-        sendTo(targets, bytes)
+        sendTo(targets, bytes, priority = SendPriority.of(packet.type))
     }
 
     /**
@@ -449,14 +529,14 @@ class MeshManager(
      * Hiç bağlantı yoksa veya süre dolarsa false döner.
      */
     suspend fun sendAwait(packet: Packet, timeoutMs: Long = 15_000): Boolean {
-        val targets = route(packet.to)
+        val targets = route(packet.to, flood = packet.flood)
         if (targets.isEmpty()) return false
         val bytes = encode(packet) ?: return false
         remember(packet.pid)
         return withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine { cont ->
                 val done = AtomicBoolean(false)
-                sendTo(targets, bytes) { ok ->
+                sendTo(targets, bytes, priority = SendPriority.of(packet.type)) { ok ->
                     if (done.compareAndSet(false, true) && cont.isActive) cont.resume(ok)
                 }
             }
@@ -466,11 +546,11 @@ class MeshManager(
     /** Sadece doğrudan bağlı kişiye gönderir (arama sinyalleri ve ses için). */
     /** Paketi (zincirleme) gönderir; gönderecek kimse yoksa false döner. */
     fun sendTracked(packet: Packet, onResult: (Boolean) -> Unit): Boolean {
-        val targets = route(packet.to)
+        val targets = route(packet.to, flood = packet.flood)
         if (targets.isEmpty()) return false
         val bytes = encode(packet) ?: return false
         remember(packet.pid)
-        sendTo(targets, bytes, onResult)
+        sendTo(targets, bytes, onResult, SendPriority.of(packet.type))
         return true
     }
 
@@ -592,6 +672,7 @@ class MeshManager(
     }
 
     private fun announce() {
+        lastAnnounceAt = System.currentTimeMillis()
         if (links.isEmpty()) return
         // İnterneti ve yapay zekâ anahtarı olan telefon kendini "köprü" olarak duyurur.
         // Köprü işaretleri: "gw" = yapay zekâ köprüsü, "net" = internet (aile sunucusu) köprüsü.
@@ -603,7 +684,7 @@ class MeshManager(
         val bytes = encode(packet) ?: return
         remember(packet.pid)
         // Duyuru, kimliğini henüz kanıtlamamış bağlantılara da gider: karşı taraf bizi ancak bununla doğrular.
-        sendTo(links.values.toList(), bytes)
+        sendTo(links.values.toList(), bytes, priority = SendPriority.HIGH)
     }
 
     // ---------------------------------------------------------------- gelen paketler
@@ -613,13 +694,23 @@ class MeshManager(
         val link = links[fromLinkId] ?: return
         // Kimliğini henüz kanıtlamamış bağlantıdan sadece kendi duyurusu kabul edilir.
         if (!link.verified && !(raw.type == Packet.TYPE_ANNOUNCE && raw.hops == 0)) return
-        if (!remember(raw.pid)) return // bu paketi daha önce işledik
+        if (!remember(raw.pid)) {
+            // Aynı duyuru başka bir komşudan da geldi: bu, gönderene giden yedek bir yol demek.
+            if (raw.type == Packet.TYPE_ANNOUNCE && raw.to == null && link.verified && crypto.verifyBroadcast(raw)) {
+                routes.learn(raw.from, fromLinkId, raw.hops + 1)
+            }
+            return
+        }
 
         val forMe = raw.to == identity.userId
         val hadKey = crypto.hasKey(raw.from)
         val packet: Packet = when {
             // Herkese giden: imzası tutmazsa atılır ve ilerletilmez (sahte SOS / işaret yayılmaz).
-            raw.to == null -> if (crypto.verifyBroadcast(raw)) raw else return
+            raw.to == null -> if (crypto.verifyBroadcast(raw)) {
+                // İmzası doğrulanmış yayın: göndereni bu komşu üzerinden bu kadar atlamada.
+                if (link.verified || raw.type == Packet.TYPE_ANNOUNCE) routes.learn(raw.from, fromLinkId, raw.hops + 1)
+                raw
+            } else return
             // Bana gelen: açılamazsa (sahte ya da bozuk) atılır.
             forMe -> crypto.open(raw) ?: return
             // Başkasına giden şifreli paket: okuyamayız, sadece taşırız.
@@ -792,7 +883,7 @@ class MeshManager(
             isNew = existing == null || existing.name != name
             val updated = when {
                 existing?.isDirect == true -> existing.copy(name = name, lastSeen = now)
-                existing != null && existing.hops < distance && now - existing.lastSeen < PEER_TIMEOUT_MS ->
+                existing != null && existing.hops < distance && now - existing.lastSeen < peerTimeoutMs ->
                     existing.copy(name = name, lastSeen = now)
                 else -> Peer(userId, name, distance, now, null, null)
             }
@@ -803,7 +894,7 @@ class MeshManager(
     }
 
     private fun expirePeers() {
-        val cutoff = System.currentTimeMillis() - PEER_TIMEOUT_MS
+        val cutoff = System.currentTimeMillis() - peerTimeoutMs
         _peers.update { map -> map.filterValues { it.isDirect || it.lastSeen >= cutoff } }
     }
 
@@ -822,7 +913,9 @@ class MeshManager(
         private const val SOS_WINDOW_MS = 10L * 60 * 1000
         private const val SOS_MAX_PER_WINDOW = 3
         private const val ANNOUNCE_EVERY_TICKS = 3
-        private const val PEER_TIMEOUT_MS = 100_000L
+        private const val SEND_TIMEOUT_MS = 15_000L
+        /** Onaysız mesajı yeniden deneme aralıkları: 25 sn, 1,5 dk, 5 dk, sonra 15 dk'da bir. */
+        private val RETRY_STEPS_MS = longArrayOf(25_000L, 90_000L, 5 * 60_000L, 15 * 60_000L)
         private const val RESEND_WINDOW_MS = 48L * 60 * 60 * 1000
         private const val SEEN_CAPACITY = 20_000
         private const val TYPING_SHOW_MS = 5_000L

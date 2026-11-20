@@ -47,6 +47,10 @@ interface Transport {
 /** Kanalların ağ motoruna haber verdiği olaylar. */
 interface LinkListener {
     fun isConnected(userId: String): Boolean
+    /** Komşu sınırı: bu kişiyle yeni bağlantı kurulmalı mı? (zaten bağlıysa da false) */
+    fun shouldConnect(userId: String): Boolean = !isConnected(userId)
+    /** Gelen bağlantı isteği için: sınır doldu mu? */
+    fun hasRoomFor(userId: String): Boolean = true
     fun onLinkUp(transport: Transport, linkId: String, userId: String, userName: String)
     fun onLinkDown(linkId: String)
     fun onData(linkId: String, bytes: ByteArray)
