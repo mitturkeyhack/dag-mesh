@@ -59,6 +59,12 @@ class KeyVault(context: Context) {
 
     fun sign(data: ByteArray): ByteArray = signer.sign(data)
 
+    /** Hassas küçük verileri (aile anahtarları gibi) Keystore ile korunmuş metne çevirir. */
+    fun protect(raw: ByteArray): String = wrap(raw)
+
+    /** [protect] ile korunan veriyi açar; açılamazsa null. */
+    fun unprotect(stored: String): ByteArray? = runCatching { unwrap(stored) }.getOrNull()
+
     /** Karşı tarafın değişim anahtarıyla ortak sır (ham X25519 çıktısı). */
     fun sharedSecret(peerDhPublic: ByteArray): ByteArray = X25519.computeSharedSecret(dhPrivate, peerDhPublic)
 

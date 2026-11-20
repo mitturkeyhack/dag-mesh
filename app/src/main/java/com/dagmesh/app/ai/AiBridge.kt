@@ -334,7 +334,7 @@ class AiBridge(
 
     fun onAnnounce(packet: Packet) {
         if (packet.from == mesh.myId) return
-        if (packet.text == GATEWAY_MARK) {
+        if (packet.text?.split(',')?.contains(GATEWAY_MARK) == true) {
             val isNew = packet.from !in _gateways.value
             _gateways.update { it + (packet.from to System.currentTimeMillis()) }
             if (isNew) flush()

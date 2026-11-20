@@ -5,6 +5,9 @@ import android.os.Build
 import com.dagmesh.app.ai.AiBridge
 import com.dagmesh.app.call.CallManager
 import com.dagmesh.app.crypto.MeshCrypto
+import com.dagmesh.app.family.FamilyManager
+import com.dagmesh.app.net.NetBridge
+import com.dagmesh.app.sos.StatusBoard
 import com.dagmesh.app.media.LocationHelper
 import com.dagmesh.app.sos.SosManager
 import com.dagmesh.app.data.Identity
@@ -132,6 +135,17 @@ class MeshManager(
     /** Yapay zekâ köprüsü (EVREN). Kişiler listesi hazır olduktan sonra kurulmalı. */
     val ai = AiBridge(appContext, dao, scope, this)
 
+    /** İnternet köprüsü (aile sunucusuna giden istekleri taşır). Yapay zekâ köprüsünden sonra kurulmalı. */
+    val net = NetBridge(scope, this)
+
+    /** Ailem: aile kodu ile kurulan şifreli grup. */
+    val family = FamilyManager(appContext, scope, this)
+
+    /** Köy yoklaması: iyiyim / yaralıyım / yardım lazım. */
+    val village = StatusBoard(appContext, scope, this)
+
+    val identityVault get() = identity.vault
+
     val myName: String get() = identity.name.value ?: "?"
     val myId: String get() = identity.userId
 
@@ -155,6 +169,8 @@ class MeshManager(
                 if (tick % ANNOUNCE_EVERY_TICKS == 0) {
                     announce()
                     ai.tick()
+                    net.tick()
+                    village.tick()
                 }
             }
         }
@@ -214,6 +230,7 @@ class MeshManager(
             dao.upsertPeer(PeerEntity(link.userId, name, now))
             flushPending()
         }
+        village.onNewPeer()
     }
 
     /** 30 sn'de kimliğini kanıtlamayan bağlantıyı kapatır; eski sürümse bir süre engeller. */
@@ -577,7 +594,11 @@ class MeshManager(
     private fun announce() {
         if (links.isEmpty()) return
         // İnterneti ve yapay zekâ anahtarı olan telefon kendini "köprü" olarak duyurur.
-        val mark = if (ai.isGatewayNow()) AiBridge.GATEWAY_MARK else null
+        // Köprü işaretleri: "gw" = yapay zekâ köprüsü, "net" = internet (aile sunucusu) köprüsü.
+        val mark = listOfNotNull(
+            AiBridge.GATEWAY_MARK.takeIf { ai.isGatewayNow() },
+            NetBridge.GATEWAY_MARK.takeIf { net.isGatewayNow() },
+        ).joinToString(",").ifEmpty { null }
         val packet = newPacket(Packet.TYPE_ANNOUNCE, to = null, ttl = Packet.ANNOUNCE_TTL, text = mark)
         val bytes = encode(packet) ?: return
         remember(packet.pid)
@@ -625,6 +646,18 @@ class MeshManager(
         when (packet.type) {
             Packet.TYPE_ANNOUNCE -> {
                 ai.onAnnounce(packet)
+                net.onAnnounce(packet.from, packet.text?.split(',')?.contains(NetBridge.GATEWAY_MARK) == true)
+                forward(packet, fromLinkId)
+            }
+
+            // İnternet köprüsü ve aile mesajları
+            Packet.TYPE_NET -> if (forMe) net.onRequest(packet) else forward(packet, fromLinkId)
+            Packet.TYPE_NET_R -> if (forMe) net.onResponse(packet) else forward(packet, fromLinkId)
+            Packet.TYPE_FAM -> if (forMe) family.onMeshCopy(packet) else forward(packet, fromLinkId)
+
+            // Köy yoklaması: herkes kaydeder, herkese iletilir.
+            Packet.TYPE_STATUS -> {
+                village.onStatus(packet)
                 forward(packet, fromLinkId)
             }
 

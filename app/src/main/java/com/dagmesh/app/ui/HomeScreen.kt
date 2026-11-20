@@ -114,7 +114,7 @@ private enum class Tab(val title: String) { RADAR("Yakındakiler"), CHATS("Sohbe
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onOpenChat: (String) -> Unit) {
+fun HomeScreen(onOpenChat: (String) -> Unit, onOpenAfet: () -> Unit = {}, onOpenFamily: () -> Unit = {}) {
     val app = App.instance
     val mesh = app.mesh
     val context = LocalContext.current
@@ -234,6 +234,8 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                 },
                 actions = {
                     if (tab == Tab.RADAR || tab == Tab.CHATS) {
+                        AfetChip(onOpenAfet)
+                        Spacer(Modifier.width(8.dp))
                         PowerModeChip(powerMode) { showPower = true }
                         Spacer(Modifier.width(8.dp))
                         NetworkToggle(running) { toggleNetwork() }
@@ -285,6 +287,7 @@ fun HomeScreen(onOpenChat: (String) -> Unit) {
                             peersMap = peersMap,
                             onOpenChat = onOpenChat,
                             onGoRadar = { tab = Tab.RADAR },
+                            onOpenFamily = onOpenFamily,
                         )
                         Tab.TRAIL -> MapTab(inner)
                         Tab.PROFILE -> ProfileTab(
@@ -517,6 +520,7 @@ private fun ChatsTab(
     peersMap: Map<String, MeshManager.Peer>,
     onOpenChat: (String) -> Unit,
     onGoRadar: () -> Unit,
+    onOpenFamily: () -> Unit,
 ) {
     val aiRow = conversations.firstOrNull { it.peerId == AiBridge.PEER_ID }
     val chats = conversations.filter { it.peerId != AiBridge.PEER_ID }
@@ -554,6 +558,13 @@ private fun ChatsTab(
                 SectionHeader("YAPAY ZEKÂ", null)
                 Spacer(Modifier.height(8.dp))
                 AiEntryCard(aiRow) { onOpenChat(AiBridge.PEER_ID) }
+            }
+        }
+        item(key = "family") {
+            Column {
+                SectionHeader("AİLEM", null)
+                Spacer(Modifier.height(8.dp))
+                FamilyEntryCard(onOpenFamily)
             }
         }
         if (chats.isEmpty()) {

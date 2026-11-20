@@ -120,6 +120,13 @@ data class Packet(
         /** Yapay zekâ köprüsü: soru (köprüye) ve cevap (soran telefona). */
         const val TYPE_AI_Q = "aiq"
         const val TYPE_AI_A = "aia"
+        /** İnternet köprüsü: aile sunucusuna giden istek ve dönen cevap (içerik zaten aile anahtarıyla şifreli). */
+        const val TYPE_NET = "net"
+        const val TYPE_NET_R = "netr"
+        /** Aile mesajının yakındaki aile üyesine mesh üzerinden doğrudan kopyası. */
+        const val TYPE_FAM = "fam"
+        /** Köy yoklaması: "iyiyim / yaralıyım / yardım lazım" (herkese, imzalı). */
+        const val TYPE_STATUS = "stat"
 
         const val PROTOCOL_VERSION = 3
 

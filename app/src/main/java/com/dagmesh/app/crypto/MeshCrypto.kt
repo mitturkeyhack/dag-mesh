@@ -170,6 +170,22 @@ class MeshCrypto(context: Context, private val vault: KeyVault) {
         )
     }
 
+    // ---------------------------------------------------------------- ayrık imza (aile mesajları)
+
+    /** Bu telefonun kimliğiyle veri imzalar (aile mesajlarında gönderenin kanıtı). */
+    fun signDetached(data: ByteArray): String = b64(vault.sign(data))
+
+    /** Kişinin anahtar belgesiyle imzayı doğrular; belge kimlikle uyuşmazsa ya da imza tutmazsa false. */
+    fun verifyDetached(peerId: String, certB64: String, data: ByteArray, sigB64: String): Boolean {
+        val key = accept(peerId, certB64)?.first ?: return false
+        return try {
+            Ed25519Verify(key.sigPublic).verify(Base64.decode(sigB64, Base64.NO_WRAP), data)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     // ---------------------------------------------------------------- doğrulama
 
     /**

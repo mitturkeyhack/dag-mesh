@@ -43,7 +43,8 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
         // Bildirime dokunulunca ilgili sohbeti aç
         LaunchedEffect(openPeerId) {
             if (openPeerId != null) {
-                nav.navigate("chat/$openPeerId") { launchSingleTop = true }
+                val route = if (openPeerId == com.dagmesh.app.family.FamilyManager.NOTIFY_PEER) "aile" else "chat/$openPeerId"
+                nav.navigate(route) { launchSingleTop = true }
                 onPeerOpened()
             }
         }
@@ -51,8 +52,19 @@ fun AppRoot(openPeerId: String?, onPeerOpened: () -> Unit) {
         Box(Modifier.fillMaxSize()) {
             NavHost(navController = nav, startDestination = "home") {
                 composable("home") {
-                    HomeScreen(onOpenChat = { nav.navigate("chat/$it") { launchSingleTop = true } })
+                    HomeScreen(
+                        onOpenChat = { nav.navigate("chat/$it") { launchSingleTop = true } },
+                        onOpenAfet = { nav.navigate("afet") { launchSingleTop = true } },
+                        onOpenFamily = { nav.navigate("aile") { launchSingleTop = true } },
+                    )
                 }
+                composable("afet") {
+                    AfetScreen(
+                        onBack = { nav.popBackStack() },
+                        onOpenFamily = { nav.navigate("aile") { launchSingleTop = true } },
+                    )
+                }
+                composable("aile") { FamilyScreen(onBack = { nav.popBackStack() }) }
                 composable("chat/{peerId}") { entry ->
                     ChatScreen(
                         peerId = entry.arguments?.getString("peerId").orEmpty(),
