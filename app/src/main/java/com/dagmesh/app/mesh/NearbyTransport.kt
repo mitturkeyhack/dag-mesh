@@ -53,6 +53,8 @@ class NearbyTransport(
     private val initiatedNames = ConcurrentHashMap<String, String>() // endpointId -> uç adı
     private val discovered = ConcurrentHashMap<String, String>()     // endpointId -> userId
     private val requested: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    /** Bağlantısı reddedilen/başarısız olan uç: tekrar denemeden önce bekle (kalabalıkta boşuna pil harcanmasın). */
+    private val cooldown = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private val myEndpointName: String get() = "${identity.userId}|${identity.name.value ?: "?"}"
 
@@ -133,6 +135,7 @@ class NearbyTransport(
     private fun requestIfNeeded(endpointId: String, userId: String) {
         if (!running) return
         if (connected.containsKey(endpointId) || !listener.shouldConnect(userId)) return
+        if ((cooldown[endpointId] ?: 0L) > System.currentTimeMillis()) return
         if (!requested.add(endpointId)) return
         client.requestConnection(myEndpointName, endpointId, lifecycleCallback)
             .addOnFailureListener {
@@ -177,7 +180,11 @@ class NearbyTransport(
         override fun onConnectionResult(endpointId: String, resolution: ConnectionResolution) {
             requested.remove(endpointId)
             val endpointName = initiatedNames.remove(endpointId)
-            if (!resolution.status.isSuccess) return
+            if (!resolution.status.isSuccess) {
+                cooldown[endpointId] = System.currentTimeMillis() + REJECT_COOLDOWN_MS
+                return
+            }
+            cooldown.remove(endpointId)
             val (userId, userName) = endpointName?.let { parseIdentity(it) } ?: return
             connected[endpointId] = userId
             listener.onLinkUp(this@NearbyTransport, linkId(endpointId), userId, userName)
@@ -220,5 +227,6 @@ class NearbyTransport(
         const val SERVICE_ID = "com.dagmesh.app.MESH"
         private val STRATEGY: Strategy = Strategy.P2P_CLUSTER
         private const val REQUEST_BACKOFF_MS = 2_500L
+        private const val REJECT_COOLDOWN_MS = 45_000L
     }
 }
