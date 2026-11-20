@@ -44,6 +44,12 @@ class MeshService : Service() {
                 mesh.calls.reject()
                 if (mesh.running.value) return START_STICKY
             }
+            ACTION_REFRESH -> {
+                if (mesh.running.value) {
+                    goForeground(callActive = micNeeded())
+                    return START_STICKY
+                }
+            }
             com.dagmesh.app.QuickActions.ACTION_SAFE -> {
                 com.dagmesh.app.QuickActions.markSafe(this)
                 if (mesh.running.value) {
@@ -53,12 +59,14 @@ class MeshService : Service() {
             }
         }
 
-        if (!goForeground(callActive = mesh.calls.state.value is CallState.Active)) {
+        if (!goForeground(callActive = micNeeded())) {
             stopSelf()
             return START_NOT_STICKY
         }
 
         if (intent?.action == ACTION_RESTART) mesh.restart() else mesh.start()
+        // Telefon yeniden başladıysa ya da sistem uygulamayı kapattıysa enkaz modu sürsün.
+        com.dagmesh.app.enkaz.EnkazMode.resumeIfNeeded(this)
 
         if (!collecting) {
             collecting = true
@@ -86,13 +94,19 @@ class MeshService : Service() {
                     val active = state is CallState.Active
                     if (active != wasActive) {
                         wasActive = active
-                        goForeground(callActive = active)
+                        goForeground(callActive = micNeeded())
                     }
                 }
             }
         }
         return START_STICKY
     }
+
+    /** Arama, enkaz modu ya da bulucu açıkken mikrofon ekran kapalıyken de çalışmalı. */
+    private fun micNeeded(): Boolean =
+        mesh.calls.state.value is CallState.Active ||
+            com.dagmesh.app.enkaz.EnkazMode.micWanted ||
+            com.dagmesh.app.enkaz.Bulucu.state.value.active
 
     private fun refreshStatus() {
         val peers = mesh.peers.value
@@ -109,8 +123,12 @@ class MeshService : Service() {
         true
     } catch (e: Exception) {
         Log.e("DagMesh", "Arka plan hizmeti başlatılamadı", e)
-        // Konum/mikrofon türü reddedildiyse (ör. uygulama arka plandayken başlatıldıysa) en temel türle dene.
-        if (!minimal) goForeground(callActive = false, minimal = true) else false
+        // Mikrofon reddedildiyse (uygulama arka plandayken) önce mikrofonsuz, sonra en temel türle dene.
+        when {
+            callActive -> goForeground(callActive = false)
+            !minimal -> goForeground(callActive = false, minimal = true)
+            else -> false
+        }
     }
 
     private fun baseType(): Int =
@@ -147,6 +165,17 @@ class MeshService : Service() {
         const val ACTION_STOP = "com.dagmesh.app.STOP"
         const val ACTION_RESTART = "com.dagmesh.app.RESTART"
         const val ACTION_REJECT_CALL = "com.dagmesh.app.REJECT_CALL"
+        const val ACTION_REFRESH = "com.dagmesh.app.REFRESH_FG"
+
+        /** Ön plan hizmet türünü (mikrofon) yeniden hesapla. */
+        fun refresh(context: Context) {
+            try {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, MeshService::class.java).setAction(ACTION_REFRESH),
+                )
+            } catch (_: Exception) {}
+        }
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, MeshService::class.java))

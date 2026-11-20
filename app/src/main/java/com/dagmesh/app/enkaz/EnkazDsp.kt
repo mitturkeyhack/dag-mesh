@@ -328,21 +328,31 @@ class PatternDetector(
 
     private fun combine() {
         val span = (count - 1).toLong() * period + tol
+        val comp = FloatArray(count)
         while (dNext + span < zEnd) {
             var s = 0.0
+            var strong = 0
             for (k in 0 until count) {
                 val c = dNext + k.toLong() * period
                 var m = 0f
                 var j = c - tol
                 while (j <= c + tol) { val v = zAt(j); if (v > m) m = v; j++ }
+                comp[k] = m
+                if (m >= COMPONENT_MIN) strong++
                 s += m.toDouble() * m
             }
-            val d = sqrt(s / count)
+            // Tek bir güçlü tepe (siren, alarm) dizi sayılmasın: en az 3 düdük ayrı ayrı duyulmalı.
+            val d = if (strong >= count - 1) sqrt(s / count) else 0.0
             if (d >= threshold) {
                 if (bestT < 0 || d > bestD) { bestT = dNext; bestD = d }
                 clusterEnd = dNext + fs / 2
             } else if (bestT >= 0 && dNext > clusterEnd) {
                 finish()
+            }
+            val p = pending
+            if (p != null && dNext > p.start + suppressWin + fs / 2) {
+                out.add(p)
+                pending = null
             }
             dNext++
         }
@@ -356,6 +366,7 @@ class PatternDetector(
         if (ampEnd - t > ringSize - 4L * fs) return
         val buf = FloatArray(2 * shw)
         var sharpSum = 0.0
+        var sharpCount = 0
         for (k in 0 until count) {
             val c = t + k.toLong() * period
             var q = c
@@ -367,10 +378,32 @@ class PatternDetector(
                 buf[cnt++] = ampAt(j)
             }
             val med = median(buf, cnt)
-            sharpSum += if (med > 0) best / med else 0.0
+            val sh = if (med > 0) best / med else 0.0
+            sharpSum += sh
+            if (sh >= 2.0) sharpCount++
         }
         val sharp = sharpSum / count
-        if (sharp >= sharpMin) out.add(Detection(t, 20 * log10(d), sharp))
+        if (sharp < sharpMin || sharpCount < count - 1) return
+        offer(Detection(t, 20 * log10(d), sharp))
+    }
+
+    // Bir dizi, bir saniye kaymış haliyle de (4 düdüğün 3'ü) eşleşir: yakındakilerden en güçlüsünü tut.
+    private val suppressWin = (count - 1).toLong() * period + fs / 2
+    private var pending: Detection? = null
+
+    private fun offer(c: Detection) {
+        val p = pending
+        if (p == null) { pending = c; return }
+        if (kotlin.math.abs(c.start - p.start) <= suppressWin) {
+            if (c.strengthDb > p.strengthDb) pending = c
+        } else {
+            out.add(p)
+            pending = c
+        }
+    }
+
+    companion object {
+        const val COMPONENT_MIN = 3.0f
     }
 }
 

@@ -106,6 +106,21 @@ object Notifications {
         notifySafely(context, 1000 + (msg.peerId.hashCode() and 0xFFFF), notification)
     }
 
+    /** Başka biri enkazda sinyal bulup "Herkese haber ver" dedi. */
+    fun rescueAlert(context: Context, pin: com.dagmesh.app.map.Pin) {
+        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_stat_mesh)
+            .setContentTitle("Enkazda canlı sinyali · ${pin.authorName}")
+            .setContentText(pin.note.ifBlank { "Dağ Mesh düdüğü duyuldu" } + " · haritada işaretli")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(pin.note.ifBlank { "Dağ Mesh düdüğü duyuldu" } + " · haritada işaretli"))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(openApp(context, null))
+            .build()
+        notifySafely(context, 3000 + (pin.id.hashCode() and 0xFFF), notification)
+    }
+
     fun incomingCall(context: Context, peerId: String, name: String) {
         val reject = PendingIntent.getService(
             context, 3,

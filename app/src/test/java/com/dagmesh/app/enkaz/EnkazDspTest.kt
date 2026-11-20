@@ -71,7 +71,7 @@ class EnkazDspTest {
         add(x, EnkazSignal.pattern(fs, true, 0.3f), 4 * fs)
         val d = run(PatternDetector(true), x)
         assertTrue("bulunamadı: $d", near(d, 4 * fs))
-        assertEquals(1, d.size)
+        assertEquals("tek dizi bir kez sayılmalı: $d", 1, d.size)
     }
 
     @Test
@@ -137,7 +137,8 @@ class EnkazDspTest {
             ph += 2 * PI * f / fs
             x[i] += (0.3 * sin(ph) + 0.15 * sin(2 * ph) + 0.08 * sin(3 * ph)).toFloat()
         }
-        assertTrue(run(PatternDetector(true), x).isEmpty())
+        val d = run(PatternDetector(true), x)
+        assertTrue("siren düdük sanıldı: $d", d.isEmpty())
     }
 
     @Test
@@ -145,8 +146,10 @@ class EnkazDspTest {
         val rnd = Random(11)
         val x = white(14 * fs, 0.01, rnd)
         add(x, EnkazSignal.pattern(fs, false, 0.3f), 5 * fs)
-        assertTrue("iniş sesi düdük sanıldı", run(PatternDetector(true), x).isEmpty())
-        assertTrue("soru bulunamadı", near(run(PatternDetector(false), x), 5 * fs))
+        val up = run(PatternDetector(true), x)
+        assertTrue("iniş sesi düdük sanıldı: $up", up.isEmpty())
+        val down = run(PatternDetector(false), x)
+        assertTrue("soru bulunamadı: $down", near(down, 5 * fs))
     }
 
     @Test
@@ -190,7 +193,7 @@ class EnkazDspTest {
         val noise = white(20 * fs, 0.003, rnd)
         var hits = 0
         var i = 0
-        while (i < noise.size) { if (trig.feed(noise.copyOfRange(i, i + 1024))) hits++; i += 1024 }
+        while (i < noise.size) { if (trig.feed(noise.copyOfRange(i, minOf(noise.size, i + 1024)))) hits++; i += 1024 }
         assertEquals("sabit gürültüde tetiklendi", 0, hits)
         // "Sesimi duyan var mı?" benzeri: 1,5 sn konuşma bandı sesi
         val voice = FloatArray(fs * 2)
@@ -200,7 +203,7 @@ class EnkazDspTest {
         }
         var got = false
         i = 0
-        while (i < voice.size) { if (trig.feed(voice.copyOfRange(i, i + 1024))) got = true; i += 1024 }
+        while (i < voice.size) { if (trig.feed(voice.copyOfRange(i, minOf(voice.size, i + 1024)))) got = true; i += 1024 }
         assertTrue("seslenme duyulmadı", got)
     }
 }

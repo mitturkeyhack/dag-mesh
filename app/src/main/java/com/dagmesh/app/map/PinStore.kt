@@ -20,6 +20,7 @@ enum class PinType(val key: String, val title: String, val emoji: String, val co
     WATER("su", "Su kaynağı", "💧", 0xFF3B9EFF, 0, "Çeşme, pınar, dere"),
     SHELTER("barinak", "Barınak / ağıl", "🛖", 0xFFB7865B, 0, "Yayla evi, ağıl, mağara"),
     DANGER("tehlike", "Tehlike", "⚠️", 0xFFE5484D, 0, "Uçurum, heyelan, kaygan yol"),
+    ENKAZ("enkaz", "Enkazda canlı sinyali", "🆘", 0xFFFF6F6F, 72, "Dağ Mesh düdüğü burada duyuldu"),
     ROAD_CLOSED("yol", "Yol kapalı", "⛔", 0xFFF08A3E, 72, "Kar, çamur, düşen ağaç"),
     SIGNAL("sebeke", "Şebeke çekiyor", "📶", 0xFF2EC4B6, 0, "Telefon/internet burada çekiyor"),
     HERD("suru", "Sürü burada", "🐑", 0xFF9AA5B1, 24, "Sürünün son görüldüğü yer"),
@@ -78,9 +79,11 @@ object PinStore {
     private val deleted = HashSet<String>()
     private lateinit var file: File
     private lateinit var mesh: MeshManager
+    private lateinit var appContext: Context
 
     fun init(context: Context, mesh: MeshManager, scope: CoroutineScope) {
         this.mesh = mesh
+        appContext = context.applicationContext
         file = File(context.filesDir, "pins.json")
         load()
         // Yeni doğrudan bağlanan telefona bildiğimiz işaretleri aktar.
@@ -101,7 +104,8 @@ object PinStore {
         }
     }
 
-    fun add(type: PinType, lat: Double, lon: Double, note: String) {
+    /** alert: alanlar bildirimle uyarılır (ör. "Herkese haber ver"). */
+    fun add(type: PinType, lat: Double, lon: Double, note: String, alert: Boolean = false) {
         val now = System.currentTimeMillis()
         val pin = Pin(
             id = UUID.randomUUID().toString().take(12),
@@ -112,7 +116,9 @@ object PinStore {
         )
         _pins.update { it + (pin.id to pin) }
         save()
-        mesh.broadcast(Packet.TYPE_PIN, pin.id, JSONObject().put("op", "add").put("pins", JSONArray().put(pin.toJson())).toString())
+        val msg = JSONObject().put("op", "add").put("pins", JSONArray().put(pin.toJson()))
+        if (alert) msg.put("al", true)
+        mesh.broadcast(Packet.TYPE_PIN, pin.id, msg.toString())
     }
 
     fun remove(pin: Pin) {
@@ -140,8 +146,13 @@ object PinStore {
                 val incoming = (0 until arr.length()).mapNotNull { Pin.fromJson(arr.getJSONObject(it)) }
                     .filter { it.id !in deleted && (it.expiresAt == 0L || it.expiresAt > now) }
                 if (incoming.isEmpty()) return
+                val fresh = incoming.filter { it.id !in _pins.value }
                 _pins.update { map -> map + incoming.filter { it.id !in map }.associateBy { it.id } }
                 save()
+                if (o.optBoolean("al")) {
+                    fresh.filter { it.type == PinType.ENKAZ && it.authorId != mesh.myId }
+                        .forEach { com.dagmesh.app.mesh.Notifications.rescueAlert(appContext, it) }
+                }
             }
             "del" -> {
                 val id = o.optString("id")
